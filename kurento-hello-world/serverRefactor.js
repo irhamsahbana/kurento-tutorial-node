@@ -60,7 +60,7 @@ let wss = new ws.Server({
 });
 
 /*
- * Error handling
+ * Error definition
  */
 const errors = {
     NO_MEDIA_SERVER: {
@@ -176,14 +176,15 @@ wss.on('connection', function (ws, req) {
  */
 
 // Recover kurentoClient for the first time.
-async function getKurentoCLientPromise() {
+function getKurentoCLientPromise() {
     return new Promise((resolve, reject) => {
         if (kurentoClient !== null) return resolve(kurentoClient);
 
         kurento(argv.ws_uri, (error, _kurentoClient) => {
             if (error) {
                 let err = errors.NO_MEDIA_SERVER
-                err.message = err.message + ws_uri;
+                err.message = err.message + argv.ws_uri;
+                err.message = err.message + ". Exiting with error " + error;
 
                 return reject(err);
             }
@@ -192,7 +193,7 @@ async function getKurentoCLientPromise() {
     });
 }
 
-function kurentoClientCreatePromise(kurentoClient, type) { // type = 'MediaPipeline'
+function kurentoClientCreatePromise(type, kurentoClient) { // type = 'MediaPipeline'
     return new Promise((resolve, reject) => {
         kurentoClient.create(type, (error, element) => {
             if (error) {
@@ -309,7 +310,7 @@ async function startPromise(sessionId, ws, sdpOffer) {
     if (!sessionId) throw errors.NO_SESSION_ID;
 
     let kurentoClient = await getKurentoCLientPromise();
-    let pipeline = await kurentoClientCreatePromise(kurentoClient, kurentoTypes.MEDIA_PIPELINE);
+    let pipeline = await kurentoClientCreatePromise(kurentoTypes.MEDIA_PIPELINE, kurentoClient);
     let webRtcEndpoint = await createMediaElementsPromise(pipeline, ws);
 
     if (candidatesQueue[sessionId]) {
@@ -340,43 +341,37 @@ function errorHandler(err, ws) {
     switch (err?.name) {
         case errors.NO_MEDIA_SERVER.name:
             console.log(err.message, 'media server is not running')
-            if (ws) ws.send(JSON.stringify(message));
+            message.message = message.message + '. ' + err.name;
             break;
         case errors.NO_SESSION_ID.name:
             console.log(err.message, 'session id is not defined')
-            if (ws) ws.send(JSON.stringify(message));
-
+            message.message = message.message + '. ' + err.name;
             break;
         case errors.KURENTO_CLIENT_CREATE.name:
             console.log(err.message, 'error creating kurento client')
-            if (ws) ws.send(JSON.stringify(message));
-
+            message.message = message.message + '. ' + err.name;
             break;
         case errors.CREATE_MEDIA_ELEMENT.name:
             console.log(err.message, 'error creating media element')
-            if (ws) ws.send(JSON.stringify(message));
-
+            message.message = message.message + '. ' + err.name;
             break;
         case errors.CONNECT_MEDIA_ELEMENTS.name:
             console.log(err.message, 'error connecting media elements')
-            if (ws) ws.send(JSON.stringify(message));
-
+            message.message = message.message + '. ' + err.name;
             break;
         case errors.PROCESS_OFFER.name:
             console.log(err.message, 'error processing offer')
-            if (ws) ws.send(JSON.stringify(message));
-
+            message.message = message.message + '. ' + err.name;
             break;
         case errors.GATHER_CANDIDATES.name:
             console.log(err.message, 'error gathering candidates')
-            if (ws) ws.send(JSON.stringify(message));
-
+            message.message = message.message + '. ' + err.name;
             break;
         default:
-            console.log(err.message, 'error unknown')
-            if (ws) ws.send(JSON.stringify(message));
+            break;
+        }
 
-    }
+        if (ws) ws.send(JSON.stringify(message));
 }
 
 app.use(express.static(path.join(__dirname, 'static')));
