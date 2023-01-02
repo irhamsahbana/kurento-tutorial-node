@@ -4,6 +4,7 @@ const cookieParser = require('cookie-parser')
 const express = require('express');
 const session = require('express-session')
 const minimist = require('minimist');
+// const moment = require('moment');
 const ws = require('ws');
 const kurento = require('kurento-client');
 const fs = require('fs');
@@ -87,6 +88,10 @@ const errors = {
         name: 'CONNECT_MEDIA_ELEMENTS',
         message: 'Error connecting media elements'
     },
+    RECORD_MEDIA_ELEMENT: {
+        name: 'RECORD_MEDIA_ELEMENT',
+        message: 'Error recording media element'
+    },
     PROCESS_OFFER: {
         name: 'PROCESS_OFFER',
         message: 'Error processing offer'
@@ -102,12 +107,9 @@ const errors = {
  */
 const kurentoTypes = {
     WEBRTC_ENDPOINT: 'WebRtcEndpoint',
+    RECORDER_ENDPOINT: 'RecorderEndpoint',
     MEDIA_PIPELINE: 'MediaPipeline',
 };
-
-const kurentoEvents = {
-    ICE_CANDIDATE_FOUND: 'IceCandidateFound',
-}
 
 /*
  * Management of WebSocket messages
@@ -210,7 +212,19 @@ function kurentoClientCreatePromise(type, kurentoClient) { // type = 'MediaPipel
 
 function createMediaElementsPromise(pipeline) {
     return new Promise((resolve, reject) => {
-        pipeline.create(kurentoTypes.WEBRTC_ENDPOINT, (error, webRtcEndpoint) => {
+        const elements = [
+            { type: kurentoTypes.WEBRTC_ENDPOINT, params: {} },
+            {
+                type: kurentoTypes.RECORDER_ENDPOINT, params: {
+                    uri: `file:///tmp/test-${Date.now().toString()}.webm`, // where to save the video
+                    mediaProfile: 'WEBM', // video format between WEBM and MP4
+                    stopOnEndOfStream: true, // stop recording when the stream is finished
+                    stopTimeOut: 1000, // 1 second using for stopOnEndOfStream
+                }
+            }
+        ];
+
+        pipeline.create(elements, (error, elements) => {
             if (error) {
                 pipeline.release();
 
@@ -220,7 +234,51 @@ function createMediaElementsPromise(pipeline) {
                 return reject(err)
             }
 
-            resolve(webRtcEndpoint);
+            const webRtcEndpoint = elements[0];
+            const recorderEndpoint = elements[1];
+
+            const createdElements = {
+                webRtcEndpoint,
+                recorderEndpoint
+            };
+
+            resolve(createdElements);
+        });
+    });
+}
+
+function connectMediaElementsWithRecorderPromise(pipeline, ws, webRtcEndpoint, recorderEndpoint) {
+    return new Promise((resolve, reject) => {
+        webRtcEndpoint.connect(recorderEndpoint, (error) => {
+            if (error) {
+                let err = errors.CONNECT_MEDIA_ELEMENTS
+                err.message = error;
+
+                pipeline.release();
+                ws.send(JSON.stringify({
+                    id: 'error',
+                    message: err.message
+                }));
+
+                return reject(err);
+            }
+
+            recorderEndpoint.record((error) => {
+                if (error) {
+                    let err = errors.RECORD_MEDIA_ELEMENT
+                    err.message = error;
+
+                    pipeline.release();
+                    ws.send(JSON.stringify({
+                        id: 'error',
+                        message: err.message
+                    }));
+
+                    return reject(err);
+                }
+
+                return resolve();
+            });
         });
     });
 }
@@ -309,9 +367,9 @@ function onIceCandidate(sessionId, _candidate) {
 async function startPromise(sessionId, ws, sdpOffer) {
     if (!sessionId) throw errors.NO_SESSION_ID;
 
-    let kurentoClient = await getKurentoCLientPromise();
-    let pipeline = await kurentoClientCreatePromise(kurentoTypes.MEDIA_PIPELINE, kurentoClient);
-    let webRtcEndpoint = await createMediaElementsPromise(pipeline, ws);
+    const kurentoClient = await getKurentoCLientPromise();
+    const pipeline = await kurentoClientCreatePromise(kurentoTypes.MEDIA_PIPELINE, kurentoClient);
+    const { webRtcEndpoint, recorderEndpoint } = await createMediaElementsPromise(pipeline);
 
     if (candidatesQueue[sessionId]) {
         while (candidatesQueue[sessionId].length) {
@@ -321,7 +379,8 @@ async function startPromise(sessionId, ws, sdpOffer) {
     }
 
     await connectMediaElementsPromise(webRtcEndpoint, ws);
-    let sdpAnswer = await processOfferPromise(webRtcEndpoint, sdpOffer);
+    await connectMediaElementsWithRecorderPromise(pipeline, ws, webRtcEndpoint, recorderEndpoint);
+    const sdpAnswer = await processOfferPromise(webRtcEndpoint, sdpOffer);
     await gatherCandidatesPromise(webRtcEndpoint);
 
     sessions[sessionId] = {
@@ -341,37 +400,41 @@ function errorHandler(err, ws) {
     switch (err?.name) {
         case errors.NO_MEDIA_SERVER.name:
             console.log(err.message, 'media server is not running')
-            message.message = message.message + '. ' + err.name;
+            message.message = err.name + ': ' + message.message;
             break;
         case errors.NO_SESSION_ID.name:
             console.log(err.message, 'session id is not defined')
-            message.message = message.message + '. ' + err.name;
+            message.message = err.name + ': ' + message.message;
             break;
         case errors.KURENTO_CLIENT_CREATE.name:
             console.log(err.message, 'error creating kurento client')
-            message.message = message.message + '. ' + err.name;
+            message.message = err.name + ': ' + message.message;
             break;
         case errors.CREATE_MEDIA_ELEMENT.name:
             console.log(err.message, 'error creating media element')
-            message.message = message.message + '. ' + err.name;
+            message.message = err.name + ': ' + message.message;
             break;
         case errors.CONNECT_MEDIA_ELEMENTS.name:
             console.log(err.message, 'error connecting media elements')
-            message.message = message.message + '. ' + err.name;
+            message.message = err.name + ': ' + message.message;
             break;
         case errors.PROCESS_OFFER.name:
             console.log(err.message, 'error processing offer')
-            message.message = message.message + '. ' + err.name;
+            message.message = err.name + ': ' + message.message;
             break;
         case errors.GATHER_CANDIDATES.name:
             console.log(err.message, 'error gathering candidates')
-            message.message = message.message + '. ' + err.name;
+            message.message = err.name + ': ' + message.message;
+            break;
+        case errors.RECORD_MEDIA_ELEMENT.name:
+            console.log(err.message, 'error recording media element')
+            message.message = err.name + ': ' + message.message;
             break;
         default:
             break;
-        }
+    }
 
-        if (ws) ws.send(JSON.stringify(message));
+    if (ws) ws.send(JSON.stringify(message));
 }
 
 app.use(express.static(path.join(__dirname, 'static')));
