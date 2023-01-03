@@ -128,7 +128,7 @@ async function startScreen() {
 		webRtcPeer = kurentoUtils.WebRtcPeer.WebRtcPeerSendrecv(options, function(error) {
 			if(error) return onError(error);
 
-			this.generateOffer(onOffer);
+			this.generateOffer(onOfferScreen);
 		});
 	}
 
