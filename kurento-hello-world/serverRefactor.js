@@ -9,6 +9,7 @@ const ws = require('ws');
 const kurento = require('kurento-client');
 const fs = require('fs');
 const https = require('https');
+const errors = require('./errors');
 
 const argv = minimist(process.argv.slice(2), {
     default: {
@@ -41,8 +42,8 @@ app.use(sessionHandler);
 /*
  * Definition of global variables.
  */
-let sessions = {};
-let candidatesQueue = {};
+const sessions = {};
+const candidatesQueue = {};
 let kurentoClient = null;
 
 /*
@@ -59,48 +60,6 @@ let wss = new ws.Server({
     server: server,
     path: '/helloworld'
 });
-
-/*
- * Error definition
- */
-const errors = {
-    NO_MEDIA_SERVER: {
-        name: 'NO_MEDIA_SERVER',
-        message: 'Could not find media server at address ',
-    },
-    NO_SESSION_ID: {
-        name: 'NO_SESSION_ID',
-        message: 'Cannot use undefined sessionId'
-    },
-    NO_PIPELINE: {
-        name: 'NO_PIPELINE',
-        message: 'Cannot use undefined pipeline'
-    },
-    KURENTO_CLIENT_CREATE: {
-        name: 'KURENTO_CLIENT_CREATE',
-        message: 'Error creating Kurento client'
-    },
-    CREATE_MEDIA_ELEMENT: {
-        name: 'CREATE_MEDIA_ELEMENT',
-        message: 'Error creating media element'
-    },
-    CONNECT_MEDIA_ELEMENTS: {
-        name: 'CONNECT_MEDIA_ELEMENTS',
-        message: 'Error connecting media elements'
-    },
-    RECORD_MEDIA_ELEMENT: {
-        name: 'RECORD_MEDIA_ELEMENT',
-        message: 'Error recording media element'
-    },
-    PROCESS_OFFER: {
-        name: 'PROCESS_OFFER',
-        message: 'Error processing offer'
-    },
-    GATHER_CANDIDATES: {
-        name: 'GATHER_CANDIDATES',
-        message: 'Error gathering candidates'
-    },
-};
 
 /*
  * Kurento types
@@ -138,13 +97,13 @@ wss.on('connection', function (ws, req) {
     });
 
     ws.on('message', function (_message) {
-        var message = JSON.parse(_message);
+        const message = JSON.parse(_message);
         console.log('Connection ' + sessionId + ' received message ', message);
 
         switch (message.id) {
             case 'start':
                 sessionId = request.session.id;
-                startPromise(sessionId, ws, message.sdpOffer).
+                start(sessionId, ws, message.sdpOffer, message.type).
                     then(sdpAnswer => {
                         ws.send(JSON.stringify({
                             id: 'startResponse',
@@ -178,13 +137,13 @@ wss.on('connection', function (ws, req) {
  */
 
 // Recover kurentoClient for the first time.
-function getKurentoCLientPromise() {
+function getKurentoCLient() {
     return new Promise((resolve, reject) => {
         if (kurentoClient !== null) return resolve(kurentoClient);
 
         kurento(argv.ws_uri, (error, _kurentoClient) => {
             if (error) {
-                let err = errors.NO_MEDIA_SERVER
+                const err = errors.NO_MEDIA_SERVER
                 err.message = err.message + argv.ws_uri;
                 err.message = err.message + ". Exiting with error " + error;
 
@@ -195,11 +154,11 @@ function getKurentoCLientPromise() {
     });
 }
 
-function kurentoClientCreatePromise(type, kurentoClient) { // type = 'MediaPipeline'
+function kurentoClientCreate(type, kurentoClient) { // type = 'MediaPipeline'
     return new Promise((resolve, reject) => {
         kurentoClient.create(type, (error, element) => {
             if (error) {
-                let err = errors.KURENTO_CLIENT_CREATE
+                const err = errors.KURENTO_CLIENT_CREATE
                 err.message = error
 
                 return reject(err);
@@ -210,14 +169,28 @@ function kurentoClientCreatePromise(type, kurentoClient) { // type = 'MediaPipel
     });
 }
 
-function createMediaElementsPromise(pipeline) {
+function createMediaElements(pipeline, type) {
     return new Promise((resolve, reject) => {
+        let mediaProfile = null;
+
+        switch (type) {
+            case 'webcam':
+                mediaProfile = 'WEBM';
+                break;
+            case 'screen':
+                mediaProfile = 'WEBM_VIDEO_ONLY';
+                break;
+            default:
+                mediaProfile = 'WEBM_VIDEO_ONLY';
+                break;
+        }
+
         const elements = [
             { type: kurentoTypes.WEBRTC_ENDPOINT, params: {} },
             {
                 type: kurentoTypes.RECORDER_ENDPOINT, params: {
                     uri: `file:///tmp/test-${Date.now().toString()}.webm`, // where to save the video
-                    mediaProfile: 'WEBM', // video format between WEBM and MP4
+                    mediaProfile: mediaProfile, // video format
                     stopOnEndOfStream: true, // stop recording when the stream is finished
                     stopTimeOut: 1000, // 1 second using for stopOnEndOfStream
                 }
@@ -228,7 +201,7 @@ function createMediaElementsPromise(pipeline) {
             if (error) {
                 pipeline.release();
 
-                let err = errors.CREATE_MEDIA_ELEMENT
+                const err = errors.CREATE_MEDIA_ELEMENT
                 err.message = error;
 
                 return reject(err)
@@ -247,11 +220,11 @@ function createMediaElementsPromise(pipeline) {
     });
 }
 
-function connectMediaElementsWithRecorderPromise(pipeline, ws, webRtcEndpoint, recorderEndpoint) {
+function connectMediaElementsWithRecorder(pipeline, ws, webRtcEndpoint, recorderEndpoint) {
     return new Promise((resolve, reject) => {
         webRtcEndpoint.connect(recorderEndpoint, (error) => {
             if (error) {
-                let err = errors.CONNECT_MEDIA_ELEMENTS
+                const err = errors.CONNECT_MEDIA_ELEMENTS
                 err.message = error;
 
                 pipeline.release();
@@ -265,7 +238,7 @@ function connectMediaElementsWithRecorderPromise(pipeline, ws, webRtcEndpoint, r
 
             recorderEndpoint.record((error) => {
                 if (error) {
-                    let err = errors.RECORD_MEDIA_ELEMENT
+                    const err = errors.RECORD_MEDIA_ELEMENT
                     err.message = error;
 
                     pipeline.release();
@@ -283,18 +256,18 @@ function connectMediaElementsWithRecorderPromise(pipeline, ws, webRtcEndpoint, r
     });
 }
 
-function connectMediaElementsPromise(webRtcEndpoint, ws) {
+function connectMediaElements(webRtcEndpoint, ws) {
     return new Promise((resolve, reject) => {
         webRtcEndpoint.connect(webRtcEndpoint, (error) => {
             if (error) {
-                let err = errors.CONNECT_MEDIA_ELEMENTS
+                const err = errors.CONNECT_MEDIA_ELEMENTS
                 err.message = error;
 
                 return reject(err);
             }
 
             webRtcEndpoint.on('IceCandidateFound', (event) => {
-                let candidate = kurento.getComplexType('IceCandidate')(event.candidate);
+                const candidate = kurento.getComplexType('IceCandidate')(event.candidate);
                 const message = {
                     id: 'iceCandidate',
                     candidate: candidate
@@ -307,11 +280,11 @@ function connectMediaElementsPromise(webRtcEndpoint, ws) {
     });
 }
 
-function processOfferPromise(webRtcEndpoint, sdpOffer) {
+function processOffer(webRtcEndpoint, sdpOffer) {
     return new Promise((resolve, reject) => {
         webRtcEndpoint.processOffer(sdpOffer, (error, sdpAnswer) => {
             if (error) {
-                let err = errors.PROCESS_OFFER
+                const err = errors.PROCESS_OFFER
                 err.message = error;
 
                 return reject(err);
@@ -322,11 +295,11 @@ function processOfferPromise(webRtcEndpoint, sdpOffer) {
     });
 }
 
-function gatherCandidatesPromise(webRtcEndpoint) {
+function gatherCandidates(webRtcEndpoint) {
     return new Promise((resolve, reject) => {
         webRtcEndpoint.gatherCandidates((error) => {
             if (error) {
-                let err = errors.GATHER_CANDIDATES
+                const err = errors.GATHER_CANDIDATES
                 err.message = error;
 
                 return reject(err);
@@ -339,7 +312,7 @@ function gatherCandidatesPromise(webRtcEndpoint) {
 
 function stop(sessionId) {
     if (sessions[sessionId]) {
-        let pipeline = sessions[sessionId].pipeline;
+        const pipeline = sessions[sessionId].pipeline;
         pipeline.release();
 
         delete sessions[sessionId];
@@ -352,7 +325,7 @@ function onIceCandidate(sessionId, _candidate) {
 
     if (sessions[sessionId]) {
         console.info('Sending candidate');
-        let webRtcEndpoint = sessions[sessionId].webRtcEndpoint;
+        const webRtcEndpoint = sessions[sessionId].webRtcEndpoint;
         webRtcEndpoint.addIceCandidate(candidate);
     }
     else {
@@ -364,24 +337,24 @@ function onIceCandidate(sessionId, _candidate) {
     }
 }
 
-async function startPromise(sessionId, ws, sdpOffer) {
+async function start(sessionId, ws, sdpOffer, type) {
     if (!sessionId) throw errors.NO_SESSION_ID;
 
-    const kurentoClient = await getKurentoCLientPromise();
-    const pipeline = await kurentoClientCreatePromise(kurentoTypes.MEDIA_PIPELINE, kurentoClient);
-    const { webRtcEndpoint, recorderEndpoint } = await createMediaElementsPromise(pipeline);
+    const kurentoClient = await getKurentoCLient();
+    const pipeline = await kurentoClientCreate(kurentoTypes.MEDIA_PIPELINE, kurentoClient);
+    const { webRtcEndpoint, recorderEndpoint } = await createMediaElements(pipeline, type);
 
     if (candidatesQueue[sessionId]) {
         while (candidatesQueue[sessionId].length) {
-            let candidate = candidatesQueue[sessionId].shift();
+            const candidate = candidatesQueue[sessionId].shift();
             webRtcEndpoint.addIceCandidate(candidate);
         }
     }
 
-    await connectMediaElementsPromise(webRtcEndpoint, ws);
-    await connectMediaElementsWithRecorderPromise(pipeline, ws, webRtcEndpoint, recorderEndpoint);
-    const sdpAnswer = await processOfferPromise(webRtcEndpoint, sdpOffer);
-    await gatherCandidatesPromise(webRtcEndpoint);
+    await connectMediaElements(webRtcEndpoint, ws);
+    await connectMediaElementsWithRecorder(pipeline, ws, webRtcEndpoint, recorderEndpoint);
+    const sdpAnswer = await processOffer(webRtcEndpoint, sdpOffer);
+    await gatherCandidates(webRtcEndpoint);
 
     sessions[sessionId] = {
         'pipeline': pipeline,

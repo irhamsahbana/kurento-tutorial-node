@@ -108,11 +108,21 @@ async function startScreen() {
 
 	function onGetStream(stream) {
 		videoInput.srcObject = stream;
+		const cstrx = {
+			audio: false,
+			video: {
+					width : { max : 640 },
+					height : { max :  480 },
+					framerate : { exact : 15 }
+			}
+	};
+
 		const options = {
-			audio: true,
+			sdpConstraints: cstrx,
+			sendSource: 'screen',
 			videoStream: stream,
 			remoteVideo: videoOutput,
-			onicecandidate: onIceCandidate,
+			onicecandidate: onIceCandidate
 		};
 
 		webRtcPeer = kurentoUtils.WebRtcPeer.WebRtcPeerSendrecv(options, function(error) {
@@ -144,7 +154,20 @@ function onOffer(error, offerSdp) {
 	console.info('Invoking SDP offer callback function ' + location.host);
 	const message = {
 		id: 'start',
-		sdpOffer: offerSdp
+		sdpOffer: offerSdp,
+		type: 'webcam'
+	}
+	sendMessage(message);
+}
+
+function onOfferScreen(error, offerSdp) {
+	if (error) return onError(error);
+
+	console.info('Invoking SDP offer callback function ' + location.host);
+	const message = {
+		id: 'start',
+		sdpOffer: offerSdp,
+		type: 'screen'
 	}
 	sendMessage(message);
 }
