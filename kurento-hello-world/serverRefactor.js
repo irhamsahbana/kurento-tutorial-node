@@ -65,9 +65,9 @@ let wss = new ws.Server({
  * Kurento types
  */
 const kurentoTypes = {
+    MEDIA_PIPELINE: 'MediaPipeline',
     WEBRTC_ENDPOINT: 'WebRtcEndpoint',
     RECORDER_ENDPOINT: 'RecorderEndpoint',
-    MEDIA_PIPELINE: 'MediaPipeline',
 };
 
 /*
@@ -189,7 +189,7 @@ function createMediaElements(pipeline, type) {
             { type: kurentoTypes.WEBRTC_ENDPOINT, params: {} },
             {
                 type: kurentoTypes.RECORDER_ENDPOINT, params: {
-                    uri: `file:///tmp/test-${Date.now().toString()}.webm`, // where to save the video
+                    uri: `file:///tmp/helloWorld-${Date.now().toString()}.webm`, // where to save the video
                     mediaProfile: mediaProfile, // video format
                     stopOnEndOfStream: true, // stop recording when the stream is finished
                     stopTimeOut: 1000, // 1 second using for stopOnEndOfStream
@@ -220,7 +220,31 @@ function createMediaElements(pipeline, type) {
     });
 }
 
-function connectMediaElementsWithRecorder(pipeline, ws, webRtcEndpoint, recorderEndpoint) {
+function connectMediaElements(webRtcEndpoint, ws) {
+    return new Promise((resolve, reject) => {
+        webRtcEndpoint.connect(webRtcEndpoint, (error) => {
+            if (error) {
+                const err = errors.CONNECT_MEDIA_ELEMENTS
+                err.message = error;
+
+                return reject(err);
+            }
+
+            webRtcEndpoint.on('IceCandidateFound', (event) => {
+                const candidate = kurento.getComplexType('IceCandidate')(event.candidate);
+                const message = {
+                    id: 'iceCandidate',
+                    candidate: candidate
+                };
+                ws.send(JSON.stringify(message));
+            });
+
+            return resolve();
+        });
+    });
+}
+
+function connectWebRtcEndpointWithRecorder(pipeline, webRtcEndpoint, recorderEndpoint, ws) {
     return new Promise((resolve, reject) => {
         webRtcEndpoint.connect(recorderEndpoint, (error) => {
             if (error) {
@@ -252,30 +276,6 @@ function connectMediaElementsWithRecorder(pipeline, ws, webRtcEndpoint, recorder
 
                 return resolve();
             });
-        });
-    });
-}
-
-function connectMediaElements(webRtcEndpoint, ws) {
-    return new Promise((resolve, reject) => {
-        webRtcEndpoint.connect(webRtcEndpoint, (error) => {
-            if (error) {
-                const err = errors.CONNECT_MEDIA_ELEMENTS
-                err.message = error;
-
-                return reject(err);
-            }
-
-            webRtcEndpoint.on('IceCandidateFound', (event) => {
-                const candidate = kurento.getComplexType('IceCandidate')(event.candidate);
-                const message = {
-                    id: 'iceCandidate',
-                    candidate: candidate
-                };
-                ws.send(JSON.stringify(message));
-            });
-
-            return resolve();
         });
     });
 }
@@ -344,15 +344,13 @@ async function start(sessionId, ws, sdpOffer, type) {
     const pipeline = await kurentoClientCreate(kurentoTypes.MEDIA_PIPELINE, kurentoClient);
     const { webRtcEndpoint, recorderEndpoint } = await createMediaElements(pipeline, type);
 
-    if (candidatesQueue[sessionId]) {
-        while (candidatesQueue[sessionId].length) {
-            const candidate = candidatesQueue[sessionId].shift();
-            webRtcEndpoint.addIceCandidate(candidate);
-        }
+    while (candidatesQueue[sessionId]?.length) {
+        const candidate = candidatesQueue[sessionId].shift();
+        webRtcEndpoint.addIceCandidate(candidate);
     }
 
-    await connectMediaElements(webRtcEndpoint, ws);
-    await connectMediaElementsWithRecorder(pipeline, ws, webRtcEndpoint, recorderEndpoint);
+    await connectMediaElements(webRtcEndpoint, ws); // connect webRtcEndpoint with itself
+    await connectWebRtcEndpointWithRecorder(pipeline, webRtcEndpoint, recorderEndpoint, ws); // connect webRtcEndpoint with recorderEndpoint
     const sdpAnswer = await processOffer(webRtcEndpoint, sdpOffer);
     await gatherCandidates(webRtcEndpoint);
 

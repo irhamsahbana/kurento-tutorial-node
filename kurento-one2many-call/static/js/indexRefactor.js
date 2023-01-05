@@ -20,9 +20,10 @@ let video;
 let webRtcPeer;
 
 $(document).ready(function () {
-	video = $('#video');
+	video = document.getElementById('video');
 
 	$('#call').click(() => presenter());
+	$('#callScreen').click(() => presenterScreen());
 	$('#viewer').click(() => viewer());
 	$('#terminate').click(() => stop());
 });
@@ -31,8 +32,12 @@ $(window).on('beforeunload', function () {
 	ws.close();
 });
 
+function onError(error) {
+	console.error(error);
+}
+
 ws.onmessage = function (_message) {
-	let message = JSON.parse(_message.data);
+	const message = JSON.parse(_message.data);
 	console.info('Received message: ' + _message.data);
 
 	switch (message.id) {
@@ -55,7 +60,7 @@ ws.onmessage = function (_message) {
 
 function presenterResponse(message) {
 	if (message.response != 'accepted') {
-		let errorMsg = message.message ? message.message : 'Unknow error';
+		const errorMsg = message.message ? message.message : 'Unknow error';
 		console.warn('Call not accepted for the following reason: ' + errorMsg);
 		dispose();
 	} else {
@@ -65,7 +70,7 @@ function presenterResponse(message) {
 
 function viewerResponse(message) {
 	if (message.response != 'accepted') {
-		let errorMsg = message.message ? message.message : 'Unknow error';
+		const errorMsg = message.message ? message.message : 'Unknow error';
 		console.warn('Call not accepted for the following reason: ' + errorMsg);
 		dispose();
 	} else {
@@ -77,7 +82,7 @@ function presenter() {
 	if (!webRtcPeer) {
 		showSpinner(video);
 
-		let options = {
+		const options = {
 			localVideo: video,
 			onicecandidate: onIceCandidate
 		}
@@ -90,12 +95,61 @@ function presenter() {
 	}
 }
 
+async function presenterScreen() {
+	if (!webRtcPeer) {
+		showSpinner(video);
+
+		function onGetStream(stream) {
+			video.srcObject = stream;
+			const cstrx = {
+				audio: false,
+				video: {
+					width: { max: 640 },
+					height: { max: 480 },
+					framerate: { exact: 15 }
+				}
+			};
+
+			const options = {
+				sdpConstraints: cstrx,
+				sendSource: 'screen',
+				videoStream: stream,
+				// remoteVideo: videoOutput,
+				onicecandidate: onIceCandidate
+			};
+
+			webRtcPeer = kurentoUtils.WebRtcPeer.WebRtcPeerSendrecv(options, function (error) {
+				if (error) return onError(error);
+
+				this.generateOffer(onOfferPresenterScreen);
+			});
+		}
+
+		const stream = await navigator.mediaDevices.getDisplayMedia();
+		video.srcObject = stream;
+
+		onGetStream(stream);
+	}
+}
+
 function onOfferPresenter(error, offerSdp) {
 	if (error) return onError(error);
 
-	let message = {
+	const message = {
 		id: 'presenter',
-		sdpOffer: offerSdp
+		sdpOffer: offerSdp,
+		type: 'webcam'
+	};
+	sendMessage(message);
+}
+
+function onOfferPresenterScreen(error, offerSdp) {
+	if (error) return onError(error);
+
+	const message = {
+		id: 'presenter',
+		sdpOffer: offerSdp,
+		type: 'screen'
 	};
 	sendMessage(message);
 }
@@ -120,7 +174,7 @@ function viewer() {
 function onOfferViewer(error, offerSdp) {
 	if (error) return onError(error)
 
-	let message = {
+	const message = {
 		id: 'viewer',
 		sdpOffer: offerSdp
 	}
@@ -130,7 +184,7 @@ function onOfferViewer(error, offerSdp) {
 function onIceCandidate(candidate) {
 	console.log('Local candidate' + JSON.stringify(candidate));
 
-	let message = {
+	const message = {
 		id: 'onIceCandidate',
 		candidate: candidate
 	}
@@ -157,7 +211,7 @@ function dispose() {
 }
 
 function sendMessage(message) {
-	let jsonMessage = JSON.stringify(message);
+	const jsonMessage = JSON.stringify(message);
 	console.log('Sending message: ' + jsonMessage);
 	ws.send(jsonMessage);
 }

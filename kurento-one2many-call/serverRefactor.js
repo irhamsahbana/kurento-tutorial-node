@@ -24,6 +24,8 @@ const kurento = require('kurento-client');
 const fs = require('fs');
 const https = require('https');
 
+const errors = require('./errors');
+
 const argv = minimist(process.argv.slice(2), {
     default: {
         as_uri: 'https://localhost:8443/',
@@ -43,11 +45,10 @@ const app = express();
  * Definition of global variables.
  */
 let idCounter = 0;
-let candidatesQueue = {};
+const candidatesQueue = {};
 let kurentoClient = null;
 let presenter = null;
-let viewers = [];
-const noPresenterMessage = 'No active presenter. Try again later...';
+const viewers = [];
 
 /*
  * Server startup
@@ -74,7 +75,7 @@ function nextUniqueId() {
  */
 wss.on('connection', function (ws) {
 
-    var sessionId = nextUniqueId();
+    const sessionId = nextUniqueId();
     console.log('Connection received with sessionId ' + sessionId);
 
     ws.on('error', function (error) {
@@ -88,12 +89,12 @@ wss.on('connection', function (ws) {
     });
 
     ws.on('message', function (_message) {
-        var message = JSON.parse(_message);
+        const message = JSON.parse(_message);
         console.log('Connection ' + sessionId + ' received message ', message);
 
         switch (message.id) {
             case 'presenter':
-                startPresenterPromise(sessionId, ws, message.sdpOffer)
+                startPresenter(sessionId, ws, message.sdpOffer, message.type)
                     .then(sdpAnswer => {
                         ws.send(JSON.stringify({
                             id: 'presenterResponse',
@@ -102,16 +103,18 @@ wss.on('connection', function (ws) {
                         }));
                     })
                     .catch(error => {
+                        console.log('<<<<<<<<<<<<<<<<<<<',error, '>>>>>>>>>>>>>>>>>>>>>>>>>');
+                        stop(sessionId);
                         ws.send(JSON.stringify({
                             id: 'presenterResponse',
                             response: 'rejected',
-                            message: error.name + ': '+ error.message
+                            message: error?.name + ': ' + error?.message
                         }));
                     });
                 break;
 
             case 'viewer':
-                startViewerPromise(sessionId, ws, message.sdpOffer)
+                startViewer(sessionId, ws, message.sdpOffer)
                     .then(sdpAnswer => {
                         ws.send(JSON.stringify({
                             id: 'viewerResponse',
@@ -120,10 +123,11 @@ wss.on('connection', function (ws) {
                         }));
                     })
                     .catch(error => {
+                        stop(sessionId);
                         ws.send(JSON.stringify({
                             id: 'viewerResponse',
                             response: 'rejected',
-                            message: error.name + ': '+ error.message
+                            message: error.name + ': ' + error.message
                         }));
                     });
                 break;
@@ -152,13 +156,11 @@ wss.on('connection', function (ws) {
 
 // Recover kurentoClient for the first time.
 function clearCandidatesQueue(sessionId) {
-    if (candidatesQueue[sessionId]) {
-        delete candidatesQueue[sessionId];
-    }
+    if (candidatesQueue[sessionId]) delete candidatesQueue[sessionId];
 }
 
 function stop(sessionId) {
-    if (presenter !== null && presenter.id == sessionId) {
+    if (presenter !== null && presenter.id == sessionId) { // if the one who is leaving is the presenter
         for (let i in viewers) {
             let viewer = viewers[i];
             if (viewer.ws) {
@@ -169,8 +171,10 @@ function stop(sessionId) {
         }
         presenter.pipeline.release();
         presenter = null;
-        viewers = [];
 
+        while (viewers?.length) {
+            viewers.shift();
+        }
     } else if (viewers[sessionId]) {
         viewers[sessionId].webRtcEndpoint.release();
         delete viewers[sessionId];
@@ -178,7 +182,7 @@ function stop(sessionId) {
 
     clearCandidatesQueue(sessionId);
 
-    if (viewers.length < 1 && !presenter) {
+    if (viewers.length < 1 && !presenter) { // if there are no more viewers and no presenter
         console.log('Closing kurento client');
 
         if (kurentoClient) {
@@ -208,46 +212,13 @@ function onIceCandidate(sessionId, _candidate) {
     }
 }
 
-// ----------------------------------------------
-
-const errors = {
-    NO_MEDIA_SERVER: {
-        name: 'NO_MEDIA_SERVER',
-        message: 'Could not find media server at address ',
-    },
-    PRESENTER_EXISTS: {
-        name: 'PRESENTER_EXISTS',
-        message: 'Another user is currently acting as presenter. Try again later...',
-    },
-    PRESENTER_NOT_FOUND: {
-        name: 'PRESENTER_NOT_FOUND',
-        message: 'No active presenter. Try again later...',
-    },
-    PIPELINE_CREATE: {
-        name: 'PIPELINE_CREATE',
-        message: 'Error creating pipeline',
-    },
-    PROCESS_OFFER: {
-        name: 'PROCESS_OFFER',
-        message: 'Error processing offer',
-    },
-    GATHER_CANDIDATES: {
-        name: 'GATHER_CANDIDATES',
-        message: 'Error gathering candidates',
-    },
-
-    CONNECT_TO_PRESENTER: {
-        name: 'CONNECT_TO_PRESENTER',
-        message: 'Error connecting to presenter',
-    },
-}
-
 const kurentoTypes = {
     MEDIA_PIPELINE: 'MediaPipeline',
     WEBRTC_ENDPOINT: 'WebRtcEndpoint',
+    RECORDER_ENDPOINT: 'RecorderEndpoint'
 }
 
-function getKurentoCLientPromise() {
+function getKurentoCLient() {
     return new Promise((resolve, reject) => {
         if (kurentoClient !== null) {
             return resolve(kurentoClient);
@@ -255,7 +226,7 @@ function getKurentoCLientPromise() {
 
         kurento(argv.ws_uri, function (error, _kurentoClient) {
             if (error) {
-                let err = errors.NO_MEDIA_SERVER
+                const err = errors.NO_MEDIA_SERVER
                 err.message = err.message + argv.ws_uri;
                 err.message = err.message + ". Exiting with error " + error;
 
@@ -271,7 +242,10 @@ function kurentoClientCreate(type, kurentoClient) {
     return new Promise((resolve, reject) => {
         kurentoClient.create(type, function (error, element) {
             if (error) {
-                return reject(error);
+                const err = errors.KURENTO_CLIENT_CREATE
+                err.message = error
+
+                return reject(err);
             }
 
             resolve(element);
@@ -279,33 +253,102 @@ function kurentoClientCreate(type, kurentoClient) {
     });
 }
 
-function createMediaElementsPromise(type, pipeline, sessionId) {
+function createMediaElements(type, pipeline, recorderType) {
+    console.log("🚀 ~ file: serverRefactor.js:257 ~ createMediaElements ~ type", type)
+    console.log("🚀 ~ file: serverRefactor.js:257 ~ createMediaElements ~ recorderType", recorderType)
     return new Promise((resolve, reject) => {
-        pipeline.create(type, function (error, element) {
+        if (type === kurentoTypes.RECORDER_ENDPOINT) {
+            let mediaProfile = null;
+
+            switch (recorderType) {
+                case 'webcam':
+                    mediaProfile = 'WEBM';
+                    break;
+                case 'screen':
+                    mediaProfile = 'WEBM_VIDEO_ONLY';
+                    break;
+                default:
+                    mediaProfile = 'WEBM_VIDEO_ONLY';
+                    break;
+            }
+
+            const elements = [
+                {
+                    type: kurentoTypes.RECORDER_ENDPOINT,
+                    params: {
+                        uri: `file:///tmp/one2many-${Date.now().toString()}.webm`, // where to save the video
+                        mediaProfile: mediaProfile, // video format
+                        stopOnEndOfStream: true, // stop recording when the stream is finished
+                        stopTimeOut: 1000, // 1 second using for stopOnEndOfStream
+                    }
+                }
+            ];
+
+            pipeline.create(elements, function (error, elements) {
+                if (error) {
+                    pipeline.release();
+                    const err = errors.CREATE_MEDIA_ELEMENTS
+                    err.message = error;
+
+                    return reject(err);
+                }
+
+                const recorderEndpoint = elements[0];
+                resolve(recorderEndpoint);
+            });
+
+        } else {
+            pipeline.create(type, function (error, element) {
+                if (error) {
+                    pipeline.release();
+                    const err = errors.CREATE_MEDIA_ELEMENTS
+                    err.message = error;
+
+                    return reject(error);
+                }
+
+                resolve(element);
+            });
+        }
+
+    });
+}
+
+function connectWebRtcEndpointWithRecorder(pipeline, webRtcEndpoint, recorderEndpoint) {
+    return new Promise((resolve, reject) => {
+        webRtcEndpoint.connect(recorderEndpoint, (error) => {
             if (error) {
-                stop(sessionId);
-                let err = errors.PIPELINE_CREATE;
+                const err = errors.CONNECT_MEDIA_ELEMENTS
                 err.message = error;
+                pipeline.release();
 
-                return reject(error);
+                return reject(err);
             }
 
-            resolve(element);
+            recorderEndpoint.record((error) => {
+                if (error) {
+                    const err = errors.RECORD_MEDIA_ELEMENT
+                    err.message = error;
+                    pipeline.release();
+
+                    return reject(err);
+                }
+
+                return resolve();
+            });
         });
     });
 }
 
-function addIceCandidatePromise(webRtcEndpoint, ws, sessionId) {
+function addingIceCandidate(webRtcEndpoint, ws, sessionId) {
     return new Promise((resolve, reject) => {
-        if (candidatesQueue[sessionId]) {
-            while (candidatesQueue[sessionId].length) {
-                let candidate = candidatesQueue[sessionId].shift();
-                webRtcEndpoint.addIceCandidate(candidate);
-            }
+        while (candidatesQueue[sessionId]?.length) {
+            const candidate = candidatesQueue[sessionId].shift();
+            webRtcEndpoint.addIceCandidate(candidate);
         }
 
         webRtcEndpoint.on('OnIceCandidate', function (event) {
-            let candidate = kurento.getComplexType('IceCandidate')(event.candidate);
+            const candidate = kurento.getComplexType('IceCandidate')(event.candidate);
             ws.send(JSON.stringify({
                 id: 'iceCandidate',
                 candidate: candidate
@@ -316,12 +359,11 @@ function addIceCandidatePromise(webRtcEndpoint, ws, sessionId) {
     });
 }
 
-function processOfferPromise(sdpOffer, webRtcEndpoint, sessionId) {
+function processOffer(sdpOffer, webRtcEndpoint) {
     return new Promise((resolve, reject) => {
         webRtcEndpoint.processOffer(sdpOffer, function (error, sdpAnswer) {
             if (error) {
-                stop(sessionId);
-                let err = errors.PROCESS_OFFER;
+                const err = errors.PROCESS_OFFER;
                 err.message = error;
 
                 return reject(err);
@@ -332,13 +374,12 @@ function processOfferPromise(sdpOffer, webRtcEndpoint, sessionId) {
     });
 }
 
-function gatherCandidatesPromise(webRtcEndpoint, sessionId) {
+function gatherCandidates(webRtcEndpoint) {
     return new Promise((resolve, reject) => {
         webRtcEndpoint.gatherCandidates(function (error) {
             if (error) {
-                let err = errors.GATHER_CANDIDATES;
+                const err = errors.GATHER_CANDIDATES;
                 err.message = error;
-                stop(sessionId);
 
                 return reject(err);
             }
@@ -348,13 +389,12 @@ function gatherCandidatesPromise(webRtcEndpoint, sessionId) {
     });
 }
 
-function connectPresenterToViewer(webRtcEndpoint, sessionId) {
+function connectPresenterToViewer(webRtcEndpoint) {
     return new Promise((resolve, reject) => {
         presenter.webRtcEndpoint.connect(webRtcEndpoint, function (error) {
             if (error) {
-                let err = errors.CONNECT_TO_PRESENTER;
+                const err = errors.CONNECT_TO_PRESENTER;
                 err.message = error;
-                stop(sessionId);
 
                 return reject(err);
             }
@@ -364,13 +404,12 @@ function connectPresenterToViewer(webRtcEndpoint, sessionId) {
     });
 }
 
-function connectViewerToPresenter(webRtcEndpoint, sessionId) {
+function connectViewerToPresenter(webRtcEndpoint) {
     return new Promise((resolve, reject) => {
         webRtcEndpoint.connect(presenter.webRtcEndpoint, function (error) {
             if (error) {
-                let err = errors.CONNECT_TO_PRESENTER;
+                const err = errors.CONNECT_TO_PRESENTER;
                 err.message = error;
-                stop(sessionId);
 
                 return reject(err);
             }
@@ -380,7 +419,7 @@ function connectViewerToPresenter(webRtcEndpoint, sessionId) {
     });
 }
 
-async function startPresenterPromise(sessionId, ws, sdpOffer) {
+async function startPresenter(sessionId, ws, sdpOffer, recorderType) {
     clearCandidatesQueue(sessionId);
 
     if (presenter !== null) { // presenter already exists
@@ -394,55 +433,48 @@ async function startPresenterPromise(sessionId, ws, sdpOffer) {
         webRtcEndpoint: null
     };
 
-    let kurentoClient = await getKurentoCLientPromise();
-    let pipeline = await kurentoClientCreate(kurentoTypes.MEDIA_PIPELINE, kurentoClient);
-
-    if (presenter === null) {
-        stop(sessionId);
-        return Promise.reject(errors.PRESENTER_NOT_FOUND);
-    }
+    const kurentoClient = await getKurentoCLient();
+    const pipeline = await kurentoClientCreate(kurentoTypes.MEDIA_PIPELINE, kurentoClient);
 
     presenter.pipeline = pipeline;
 
-    let webRtcEndpoint = await createMediaElementsPromise(kurentoTypes.WEBRTC_ENDPOINT, pipeline, sessionId);
+    const webRtcEndpoint = await createMediaElements(kurentoTypes.WEBRTC_ENDPOINT, pipeline);
+    await addingIceCandidate(webRtcEndpoint, ws, sessionId);
+    const recorderEndpoint = await createMediaElements(kurentoTypes.RECORDER_ENDPOINT, pipeline, recorderType);
+
+    await connectWebRtcEndpointWithRecorder(pipeline, webRtcEndpoint, recorderEndpoint);
 
     presenter.webRtcEndpoint = webRtcEndpoint;
 
-    await addIceCandidatePromise(webRtcEndpoint, ws, sessionId);
-    let sdpAnswer = await processOfferPromise(sdpOffer, webRtcEndpoint, sessionId);
-    await gatherCandidatesPromise(webRtcEndpoint, sessionId);
+    const sdpAnswer = await processOffer(sdpOffer, webRtcEndpoint);
+    await gatherCandidates(webRtcEndpoint);
 
     return sdpAnswer;
 }
 
-async function startViewerPromise(sessionId, ws, sdpOffer) {
+async function startViewer(sessionId, ws, sdpOffer) {
     clearCandidatesQueue(sessionId);
 
     if (!presenter) {
         return Promise.reject(errors.PRESENTER_NOT_FOUND);
     }
 
-    let viewer = {
+    const viewer = {
         id: sessionId,
         webRtcEndpoint: null
     }
 
-    let webRtcEndpoint = await createMediaElementsPromise(kurentoTypes.WEBRTC_ENDPOINT, presenter.pipeline, sessionId);
-
-    if (presenter === null) {
-        stop(sessionId);
-        return Promise.reject(errors.PRESENTER_NOT_FOUND);
-    }
+    const webRtcEndpoint = await createMediaElements(kurentoTypes.WEBRTC_ENDPOINT, presenter.pipeline);
 
     viewer.webRtcEndpoint = webRtcEndpoint;
 
-    await addIceCandidatePromise(webRtcEndpoint, ws, sessionId);
-    await connectPresenterToViewer(webRtcEndpoint, sessionId);
-    await connectViewerToPresenter(webRtcEndpoint, sessionId);
+    await addingIceCandidate(webRtcEndpoint, ws, sessionId);
+    await connectPresenterToViewer(webRtcEndpoint);
+    await connectViewerToPresenter(webRtcEndpoint);
 
-    let sdpAnswer = await processOfferPromise(sdpOffer, webRtcEndpoint, sessionId);
+    const sdpAnswer = await processOffer(sdpOffer, webRtcEndpoint);
 
-    await gatherCandidatesPromise(webRtcEndpoint, sessionId);
+    await gatherCandidates(webRtcEndpoint);
 
     viewers[sessionId] = viewer;
 
