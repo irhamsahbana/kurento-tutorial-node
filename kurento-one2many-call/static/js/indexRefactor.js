@@ -99,6 +99,10 @@ async function presenterScreen() {
 	if (!webRtcPeer) {
 		showSpinner(video);
 
+		const stream = await navigator.mediaDevices.getDisplayMedia();
+		video.srcObject = stream;
+		onGetStream(stream);
+
 		function onGetStream(stream) {
 			video.srcObject = stream;
 			const cstrx = {
@@ -114,21 +118,17 @@ async function presenterScreen() {
 				sdpConstraints: cstrx,
 				sendSource: 'screen',
 				videoStream: stream,
+
 				// remoteVideo: videoOutput,
 				onicecandidate: onIceCandidate
 			};
 
-			webRtcPeer = kurentoUtils.WebRtcPeer.WebRtcPeerSendrecv(options, function (error) {
+			webRtcPeer = kurentoUtils.WebRtcPeer.WebRtcPeerSendonly(options, function (error) {
 				if (error) return onError(error);
 
 				this.generateOffer(onOfferPresenterScreen);
 			});
 		}
-
-		const stream = await navigator.mediaDevices.getDisplayMedia();
-		video.srcObject = stream;
-
-		onGetStream(stream);
 	}
 }
 
@@ -158,7 +158,7 @@ function viewer() {
 	if (!webRtcPeer) {
 		showSpinner(video);
 
-		let options = {
+		const options = {
 			remoteVideo: video,
 			onicecandidate: onIceCandidate
 		}
