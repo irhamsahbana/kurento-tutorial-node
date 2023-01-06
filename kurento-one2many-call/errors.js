@@ -40,9 +40,9 @@ const errors = {
         name: 'CONNECT_TO_PRESENTER',
         message: 'Error connecting to presenter',
     },
-    ROOM_NOT_FOUND: {
-        name: 'ROOM_NOT_FOUND',
-        message: 'Room not found',
+    ROOM_NOT_PROVIDED: {
+        name: 'ROOM_NOT_PROVIDED',
+        message: 'Room not provided',
     },
 }
 

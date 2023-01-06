@@ -97,7 +97,12 @@ wss.on('connection', function (ws) {
 
     ws.on('message', function (_message) {
         const message = JSON.parse(_message);
-        console.log('Connection ' + sessionId + ' received message ', message);
+
+        if (message.id === 'presenter'|| message.id === 'viewer')
+            console.log('Connection ' + sessionId + ' received message id', message.id, 'from room', message.room);
+        else
+            console.log('Connection ' + sessionId + ' received message', message);
+
         ws.room = message.room;
 
         switch (message.id) {
@@ -194,7 +199,8 @@ function stop(sessionId) {
     if (isPresenter) {
         for (let i in viewers) {
             let viewer = viewers[i];
-            if (viewer.ws) {
+
+            if (viewer.ws && viewer.room === presenters[presenterIndex].room) {
                 viewer.ws.send(JSON.stringify({
                     id: 'stopCommunication',
                     room: presenters[presenterIndex].room
@@ -471,7 +477,7 @@ function connectViewerToPresenter(webRtcEndpoint, room) {
 async function startPresenter(sessionId, ws, sdpOffer, recorderType, room) {
     clearCandidatesQueue(sessionId);
 
-    if (!room) return Promise.reject(errors.ROOM_NOT_FOUND);
+    if (!room) return Promise.reject(errors.ROOM_NOT_PROVIDED);
     const presenterExistInRoom = presenters.find(o => o.room === room);
     if (presenterExistInRoom) return Promise.reject(errors.PRESENTER_EXISTS);
 
@@ -507,8 +513,8 @@ async function startPresenter(sessionId, ws, sdpOffer, recorderType, room) {
 async function startViewer(sessionId, ws, sdpOffer, room) {
     clearCandidatesQueue(sessionId);
 
-    const presenterExistInRoom = presenters.find(o => o.room === room);
-    if (!presenterExistInRoom) return Promise.reject(errors.PRESENTER_NOT_FOUND);
+    const presenterIndex = getPresenterIndex(room);
+    if (presenterIndex === -1) return Promise.reject(errors.PRESENTER_NOT_FOUND);
 
     const viewer = {
         id: sessionId,
