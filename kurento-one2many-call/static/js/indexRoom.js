@@ -52,7 +52,8 @@ ws.onmessage = function (_message) {
 			viewerResponse(message);
 			break;
 		case 'stopCommunication':
-			dispose();
+			if (message.room == room)
+				dispose();
 			break;
 		case 'iceCandidate':
 			webRtcPeer.addIceCandidate(message.candidate)
@@ -207,7 +208,7 @@ function onIceCandidate(candidate) {
 function stop() {
 	console.log('Stopping video call ...')
 	if (webRtcPeer) {
-		var message = {
+		const message = {
 			id: 'stop'
 		}
 		sendMessage(message);

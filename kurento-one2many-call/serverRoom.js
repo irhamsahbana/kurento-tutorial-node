@@ -98,6 +98,7 @@ wss.on('connection', function (ws) {
     ws.on('message', function (_message) {
         const message = JSON.parse(_message);
         console.log('Connection ' + sessionId + ' received message ', message);
+        ws.room = message.room;
 
         switch (message.id) {
             case 'presenter':
@@ -173,21 +174,11 @@ function search(sessionId) {
     let presenterIndex = -1;
     let viewerIndex = -1;
 
-    if (_.find(presenters, function (o) { return o.id == sessionId })) {
-        isPresenter = true;
-    }
+    if (presenters.find(o => o.id === sessionId)) isPresenter = true;
+    if (viewers.find(o => o.id === sessionId)) isViewer = true;
 
-    if (_.find(viewers, function (o) { return o.id == sessionId })) {
-        isViewer = true;
-    }
-
-    if (isPresenter) {
-        presenterIndex = _.findIndex(presenters, function (o) { return o.id == sessionId });
-    }
-
-    if (isViewer) {
-        viewerIndex = _.findIndex(viewers, function (o) { return o.id == sessionId });
-    }
+    if (isPresenter) presenterIndex = presenters.findIndex(o => o.id === sessionId);
+    if (isViewer) viewerIndex = viewers.findIndex(o => o.id === sessionId);
 
     return {
         isPresenter,
@@ -205,7 +196,8 @@ function stop(sessionId) {
             let viewer = viewers[i];
             if (viewer.ws) {
                 viewer.ws.send(JSON.stringify({
-                    id: 'stopCommunication'
+                    id: 'stopCommunication',
+                    room: presenters[presenterIndex].room
                 }));
             }
         }
@@ -214,6 +206,8 @@ function stop(sessionId) {
         while (viewers?.length) {
             viewers.shift();
         }
+
+        presenters.splice(presenterIndex, 1);
     }
 
     if (isViewer) {
@@ -228,6 +222,7 @@ function stop(sessionId) {
 
         if (kurentoClient) {
             kurentoClient.close();
+            console.log('kurento client closed')
         }
         kurentoClient = null;
     }
@@ -426,7 +421,7 @@ function gatherCandidates(webRtcEndpoint) {
 }
 
 function getPresenterIndex(room) {
-    const index = _.findIndex(presenters, (o) => o.room === room);
+    const index = presenters.findIndex(o => o.room === room);
 
     return index;
 }
@@ -477,19 +472,15 @@ async function startPresenter(sessionId, ws, sdpOffer, recorderType, room) {
     clearCandidatesQueue(sessionId);
 
     if (!room) return Promise.reject(errors.ROOM_NOT_FOUND);
-
-    const { presenterIndex } = search(sessionId)
-
-    if (presenterIndex !== -1) {
-        stop(sessionId);
-        return Promise.reject(errors.PRESENTER_EXISTS);
-    }
+    const presenterExistInRoom = presenters.find(o => o.room === room);
+    if (presenterExistInRoom) return Promise.reject(errors.PRESENTER_EXISTS);
 
     const presenter = {
         id: sessionId,
         pipeline: null,
         webRtcEndpoint: null,
-        room: room
+        room: room,
+        ws: ws
     };
 
     const kurentoClient = await getKurentoCLient();
@@ -516,16 +507,14 @@ async function startPresenter(sessionId, ws, sdpOffer, recorderType, room) {
 async function startViewer(sessionId, ws, sdpOffer, room) {
     clearCandidatesQueue(sessionId);
 
-    const presenterIndex = _.findIndex(presenters, (o) => o.room === room);
-
-    if (presenterIndex === -1) {
-        return Promise.reject(errors.PRESENTER_NOT_FOUND);
-    }
+    const presenterExistInRoom = presenters.find(o => o.room === room);
+    if (!presenterExistInRoom) return Promise.reject(errors.PRESENTER_NOT_FOUND);
 
     const viewer = {
         id: sessionId,
         webRtcEndpoint: null,
-        room: room
+        room: room,
+        ws: ws
     }
 
     const webRtcEndpoint = await createMediaElements(kurentoTypes.WEBRTC_ENDPOINT, presenters[presenterIndex].pipeline);
