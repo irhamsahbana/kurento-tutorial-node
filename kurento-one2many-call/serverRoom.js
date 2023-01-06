@@ -23,6 +23,7 @@ const ws = require('ws');
 const kurento = require('kurento-client');
 const fs = require('fs');
 const https = require('https');
+const _ = require('lodash');
 
 const errors = require('./errors');
 
@@ -47,8 +48,14 @@ const app = express();
 let idCounter = 0;
 const candidatesQueue = {};
 let kurentoClient = null;
-let presenter = null;
+const presenters = [];
 const viewers = [];
+
+const kurentoTypes = {
+    MEDIA_PIPELINE: 'MediaPipeline',
+    WEBRTC_ENDPOINT: 'WebRtcEndpoint',
+    RECORDER_ENDPOINT: 'RecorderEndpoint'
+}
 
 /*
  * Server startup
@@ -94,7 +101,7 @@ wss.on('connection', function (ws) {
 
         switch (message.id) {
             case 'presenter':
-                startPresenter(sessionId, ws, message.sdpOffer, message.type)
+                startPresenter(sessionId, ws, message.sdpOffer, message.type, message.room)
                     .then(sdpAnswer => {
                         ws.send(JSON.stringify({
                             id: 'presenterResponse',
@@ -103,7 +110,7 @@ wss.on('connection', function (ws) {
                         }));
                     })
                     .catch(error => {
-                        console.log('<<<<<<<<<<<<<<<<<<<',error, '>>>>>>>>>>>>>>>>>>>>>>>>>');
+                        console.log('<<<<<<<<<<<<<<<<<<<', error, '>>>>>>>>>>>>>>>>>>>>>>>>>');
                         stop(sessionId);
                         ws.send(JSON.stringify({
                             id: 'presenterResponse',
@@ -114,7 +121,7 @@ wss.on('connection', function (ws) {
                 break;
 
             case 'viewer':
-                startViewer(sessionId, ws, message.sdpOffer)
+                startViewer(sessionId, ws, message.sdpOffer, message.room)
                     .then(sdpAnswer => {
                         ws.send(JSON.stringify({
                             id: 'viewerResponse',
@@ -124,6 +131,7 @@ wss.on('connection', function (ws) {
                     })
                     .catch(error => {
                         stop(sessionId);
+                        console.log('<<<<<<<<<<<<<<<<<<<', error, '>>>>>>>>>>>>>>>>>>>>>>>>>');
                         ws.send(JSON.stringify({
                             id: 'viewerResponse',
                             response: 'rejected',
@@ -159,8 +167,40 @@ function clearCandidatesQueue(sessionId) {
     if (candidatesQueue[sessionId]) delete candidatesQueue[sessionId];
 }
 
+function search(sessionId) {
+    let isPresenter = false;
+    let isViewer = false;
+    let presenterIndex = -1;
+    let viewerIndex = -1;
+
+    if (_.find(presenters, function (o) { return o.id == sessionId })) {
+        isPresenter = true;
+    }
+
+    if (_.find(viewers, function (o) { return o.id == sessionId })) {
+        isViewer = true;
+    }
+
+    if (isPresenter) {
+        presenterIndex = _.findIndex(presenters, function (o) { return o.id == sessionId });
+    }
+
+    if (isViewer) {
+        viewerIndex = _.findIndex(viewers, function (o) { return o.id == sessionId });
+    }
+
+    return {
+        isPresenter,
+        isViewer,
+        presenterIndex,
+        viewerIndex
+    };
+}
+
 function stop(sessionId) {
-    if (presenter !== null && presenter.id == sessionId) { // if the one who is leaving is the presenter
+    const { isPresenter, isViewer, presenterIndex, viewerIndex } = search(sessionId);
+
+    if (isPresenter) {
         for (let i in viewers) {
             let viewer = viewers[i];
             if (viewer.ws) {
@@ -169,20 +209,21 @@ function stop(sessionId) {
                 }));
             }
         }
-        presenter.pipeline.release();
-        presenter = null;
+        presenters[presenterIndex].pipeline.release();
 
         while (viewers?.length) {
             viewers.shift();
         }
-    } else if (viewers[sessionId]) {
-        viewers[sessionId].webRtcEndpoint.release();
-        delete viewers[sessionId];
+    }
+
+    if (isViewer) {
+        viewers[viewerIndex].webRtcEndpoint.release();
+        viewers.splice(viewerIndex, 1);
     }
 
     clearCandidatesQueue(sessionId);
 
-    if (viewers.length < 1 && !presenter) { // if there are no more viewers and no presenter
+    if (!viewers.length && !presenters.length) { // if there are no more viewers and no presenter
         console.log('Closing kurento client');
 
         if (kurentoClient) {
@@ -190,32 +231,29 @@ function stop(sessionId) {
         }
         kurentoClient = null;
     }
+
+    console.log('presenters', presenters);
+    console.log('viewers', viewers);
 }
 
 function onIceCandidate(sessionId, _candidate) {
     let candidate = kurento.getComplexType('IceCandidate')(_candidate);
 
-    if (presenter && presenter.id === sessionId && presenter.webRtcEndpoint) {
+    const { isPresenter, isViewer, presenterIndex, viewerIndex } = search(sessionId);
+
+    if (isPresenter && presenters[presenterIndex]?.webRtcEndpoint) {
         console.info('Sending presenter candidate');
-        presenter.webRtcEndpoint.addIceCandidate(candidate);
-    }
-    else if (viewers[sessionId] && viewers[sessionId].webRtcEndpoint) {
+        presenters[presenterIndex].webRtcEndpoint.addIceCandidate(candidate);
+    } else if (isViewer && viewers[viewerIndex]?.webRtcEndpoint) {
         console.info('Sending viewer candidate');
-        viewers[sessionId].webRtcEndpoint.addIceCandidate(candidate);
-    }
-    else {
+        viewers[viewerIndex].webRtcEndpoint.addIceCandidate(candidate);
+    } else {
         console.info('Queueing candidate');
         if (!candidatesQueue[sessionId]) {
             candidatesQueue[sessionId] = [];
         }
         candidatesQueue[sessionId].push(candidate);
     }
-}
-
-const kurentoTypes = {
-    MEDIA_PIPELINE: 'MediaPipeline',
-    WEBRTC_ENDPOINT: 'WebRtcEndpoint',
-    RECORDER_ENDPOINT: 'RecorderEndpoint'
 }
 
 function getKurentoCLient() {
@@ -253,7 +291,7 @@ function kurentoClientCreate(type, kurentoClient) {
     });
 }
 
-function createMediaElements(type, pipeline, recorderType) {
+function createMediaElements(type, pipeline, room, recorderType) {
     return new Promise((resolve, reject) => {
         if (type === kurentoTypes.RECORDER_ENDPOINT) {
             let mediaProfile = null;
@@ -274,7 +312,7 @@ function createMediaElements(type, pipeline, recorderType) {
                 {
                     type: kurentoTypes.RECORDER_ENDPOINT,
                     params: {
-                        uri: `file:///tmp/one2many-${Date.now().toString()}.webm`, // where to save the video
+                        uri: `file:///tmp/${room}-room-one2many-case-${Date.now().toString()}.webm`, // where to save the video
                         mediaProfile: mediaProfile, // video format
                         stopOnEndOfStream: true, // stop recording when the stream is finished
                         stopTimeOut: 1000, // 1 second using for stopOnEndOfStream
@@ -387,9 +425,21 @@ function gatherCandidates(webRtcEndpoint) {
     });
 }
 
-function connectPresenterToViewer(webRtcEndpoint) {
+function getPresenterIndex(room) {
+    const index = _.findIndex(presenters, (o) => o.room === room);
+
+    return index;
+}
+
+function connectPresenterToViewer(webRtcEndpoint, room) {
     return new Promise((resolve, reject) => {
-        presenter.webRtcEndpoint.connect(webRtcEndpoint, function (error) {
+        const presenterIndex = getPresenterIndex(room);
+
+        if (presenterIndex === -1) {
+            return reject(errors.PRESENTER_NOT_FOUND);
+        }
+
+        presenters[presenterIndex].webRtcEndpoint.connect(webRtcEndpoint, function (error) {
             if (error) {
                 const err = errors.CONNECT_TO_PRESENTER;
                 err.message = error;
@@ -402,9 +452,15 @@ function connectPresenterToViewer(webRtcEndpoint) {
     });
 }
 
-function connectViewerToPresenter(webRtcEndpoint) {
+function connectViewerToPresenter(webRtcEndpoint, room) {
     return new Promise((resolve, reject) => {
-        webRtcEndpoint.connect(presenter.webRtcEndpoint, function (error) {
+        const presenterIndex = getPresenterIndex(room);
+
+        if (presenterIndex === -1) {
+            return reject(errors.PRESENTER_NOT_FOUND);
+        }
+
+        webRtcEndpoint.connect(presenters[presenterIndex].webRtcEndpoint, function (error) {
             if (error) {
                 const err = errors.CONNECT_TO_PRESENTER;
                 err.message = error;
@@ -417,18 +473,23 @@ function connectViewerToPresenter(webRtcEndpoint) {
     });
 }
 
-async function startPresenter(sessionId, ws, sdpOffer, recorderType) {
+async function startPresenter(sessionId, ws, sdpOffer, recorderType, room) {
     clearCandidatesQueue(sessionId);
 
-    if (presenter !== null) { // presenter already exists
+    if (!room) return Promise.reject(errors.ROOM_NOT_FOUND);
+
+    const { presenterIndex } = search(sessionId)
+
+    if (presenterIndex !== -1) {
         stop(sessionId);
         return Promise.reject(errors.PRESENTER_EXISTS);
     }
 
-    presenter = {
+    const presenter = {
         id: sessionId,
         pipeline: null,
-        webRtcEndpoint: null
+        webRtcEndpoint: null,
+        room: room
     };
 
     const kurentoClient = await getKurentoCLient();
@@ -437,12 +498,14 @@ async function startPresenter(sessionId, ws, sdpOffer, recorderType) {
     presenter.pipeline = pipeline;
 
     const webRtcEndpoint = await createMediaElements(kurentoTypes.WEBRTC_ENDPOINT, pipeline);
+    presenter.webRtcEndpoint = webRtcEndpoint;
     await addingIceCandidate(webRtcEndpoint, ws, sessionId);
-    const recorderEndpoint = await createMediaElements(kurentoTypes.RECORDER_ENDPOINT, pipeline, recorderType);
+    const recorderEndpoint = await createMediaElements(kurentoTypes.RECORDER_ENDPOINT, pipeline, room, recorderType);
 
     await connectWebRtcEndpointWithRecorder(pipeline, webRtcEndpoint, recorderEndpoint);
 
-    presenter.webRtcEndpoint = webRtcEndpoint;
+    presenters.push(presenter);
+
 
     const sdpAnswer = await processOffer(sdpOffer, webRtcEndpoint);
     await gatherCandidates(webRtcEndpoint);
@@ -450,31 +513,34 @@ async function startPresenter(sessionId, ws, sdpOffer, recorderType) {
     return sdpAnswer;
 }
 
-async function startViewer(sessionId, ws, sdpOffer) {
+async function startViewer(sessionId, ws, sdpOffer, room) {
     clearCandidatesQueue(sessionId);
 
-    if (!presenter) {
+    const presenterIndex = _.findIndex(presenters, (o) => o.room === room);
+
+    if (presenterIndex === -1) {
         return Promise.reject(errors.PRESENTER_NOT_FOUND);
     }
 
     const viewer = {
         id: sessionId,
-        webRtcEndpoint: null
+        webRtcEndpoint: null,
+        room: room
     }
 
-    const webRtcEndpoint = await createMediaElements(kurentoTypes.WEBRTC_ENDPOINT, presenter.pipeline);
+    const webRtcEndpoint = await createMediaElements(kurentoTypes.WEBRTC_ENDPOINT, presenters[presenterIndex].pipeline);
 
     viewer.webRtcEndpoint = webRtcEndpoint;
 
     await addingIceCandidate(webRtcEndpoint, ws, sessionId);
-    await connectPresenterToViewer(webRtcEndpoint);
-    await connectViewerToPresenter(webRtcEndpoint);
+    await connectPresenterToViewer(webRtcEndpoint, room);
+    await connectViewerToPresenter(webRtcEndpoint, room);
 
     const sdpAnswer = await processOffer(sdpOffer, webRtcEndpoint);
 
     await gatherCandidates(webRtcEndpoint);
 
-    viewers[sessionId] = viewer;
+    viewers.push(viewer);
 
     return sdpAnswer;
 }

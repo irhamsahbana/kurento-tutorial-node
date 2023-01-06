@@ -22,7 +22,7 @@
     <script src="bower_components/kurento-utils/js/kurento-utils.js"></script>
 
     <!-- <script src="js/index.js"></script> -->
-    <script src="js/indexRoom.js"></script>
+    <script src="js/indexRefactor.js"></script>
     <title>Kurento Tutorial 3: Video Call 1 to N with WebRTC</title>
   </head>
   <body>
@@ -38,7 +38,7 @@
             id="bs-example-navbar-collapse-1">
             <ul class="nav navbar-nav navbar-right">
               <li>
-                <a href="https://github.com/irhamsahbana/kurento-tutorial-node/tree/refactor/kurento-one2many-call">
+                <a href="https://github.com/Kurento/kurento-tutorial-node/tree/master/kurento-one2many-call">
                   <span class="glyphicon glyphicon-file"></span> Source Code</a>
               </li>
             </ul>
@@ -49,7 +49,7 @@
 
     <div class="container">
       <div class="page-header">
-        <h1>Video Call 1 to N with WebRTC and Record Capability</h1>
+        <h1>Tutorial 3: Video Call 1 to N with WebRTC</h1>
         <p>
           This web application consists on an one to many video call using
           <a href="http://www.webrtc.org/">WebRTC</a>. In other words, this is
@@ -103,13 +103,6 @@
             </div>
           </div>
           <br/>
-          <div class="row">
-            <div class="col-md-12">
-              <label class="control-label" for="room">Room Name</label>
-              <input id="room" type="text" class="form-control" placeholder="Enter Room Name" value="testing">
-            </div>
-          </div>
-          <br/>
           <label class="control-label" for="console">Console</label><br><br>
           <div id="console" class="democonsole">
             <ul></ul>
@@ -117,7 +110,7 @@
         </div>
         <div class="col-md-7">
           <div id="videoBig">
-            <video id="video" autoplay width="640px" height="480px" poster="img/unhas.png"></video>
+            <video id="video" autoplay width="640px" height="480px" poster="img/webrtc.png"></video>
           </div>
         </div>
       </div>
