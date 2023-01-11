@@ -6,9 +6,9 @@
     "postinstall": "cd static && bower install"
   },
   "dependencies": {
+    "ejs": "^3.1.8",
     "express": "^4.17.0",
     "kurento-client": "git+https://github.com/Kurento/kurento-client-js.git",
-    "lodash": "^4.17.21",
     "minimist": "^1.1.1",
     "ws": "^7.1.0"
   },

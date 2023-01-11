@@ -37,6 +37,12 @@ $(window).on('beforeunload', function () {
 });
 
 function onError(error) {
+	Swal.fire({
+		icon: 'error',
+		title: 'Oops...',
+		text: error,
+	})
+
 	console.error(error);
 }
 
@@ -67,6 +73,8 @@ function presenterResponse(message) {
 	if (message.response != 'accepted') {
 		const errorMsg = message.message ? message.message : 'Unknow error';
 		console.warn('Call not accepted for the following reason: ' + errorMsg);
+
+		onError(errorMsg);
 		dispose();
 	} else {
 		webRtcPeer.processAnswer(message.sdpAnswer);
@@ -77,6 +85,8 @@ function viewerResponse(message) {
 	if (message.response != 'accepted') {
 		const errorMsg = message.message ? message.message : 'Unknow error';
 		console.warn('Call not accepted for the following reason: ' + errorMsg);
+
+		onError(errorMsg);
 		dispose();
 	} else {
 		webRtcPeer.processAnswer(message.sdpAnswer);
@@ -84,7 +94,7 @@ function viewerResponse(message) {
 }
 
 function presenter() {
-	if (!room) return window.alert('You must insert room name');
+	if (!room) return onError('You must insert room name');
 
 	if (!webRtcPeer) {
 		showSpinner(video);
@@ -103,7 +113,7 @@ function presenter() {
 }
 
 async function presenterScreen() {
-	if (!room) return window.alert('You must insert room name');
+	if (!room) return onError('You must insert room name');
 
 	if (!webRtcPeer) {
 		showSpinner(video);
@@ -166,7 +176,7 @@ function onOfferPresenterScreen(error, offerSdp) {
 }
 
 function viewer() {
-	if (!room) return window.alert('You must insert room name');
+	if (!room) return onError('You must insert room name');
 
 	if (!webRtcPeer) {
 		showSpinner(video);
@@ -232,7 +242,7 @@ function sendMessage(message) {
 
 function showSpinner() {
 	for (let i = 0;i < arguments.length;i++) {
-		arguments[i].poster = './img/transparent-1px.png';
+		arguments[i].poster = '/img/transparent-1px.png';
 		arguments[i].style.background = 'center transparent url("./img/spinner.gif") no-repeat';
 	}
 }
@@ -240,7 +250,7 @@ function showSpinner() {
 function hideSpinner() {
 	for (let i = 0;i < arguments.length;i++) {
 		arguments[i].src = '';
-		arguments[i].poster = './img/unhas.png';
+		arguments[i].poster = '/img/unhas.png';
 		arguments[i].style.background = '';
 	}
 }

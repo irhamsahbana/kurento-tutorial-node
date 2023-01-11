@@ -1,0 +1,100 @@
+<nav class="navbar bg-body-tertiary mb-4">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="#"> Univesitas Hasanuddin </a>
+  </div>
+</nav>
+
+<div class="container-lg">
+  <div class="row mb-2 gx-lg-5">
+    <div class="col-lg-6"> <%# left side for video %>
+      <div class="row mb-2">
+        <video
+          id="video"
+          autoplay
+          width="640px"
+          height="480px"
+          poster="img/unhas.png"
+          class="visualize-border"
+        ></video>
+      </div>
+      <div class="row mb-2">
+        <div class="col">
+          <a href="#" class="btn btn-primary" id="call">Present</a>
+          <a href="#" class="btn btn-primary" id="callScreen">Present Screen</a>
+          <a href="#" class="btn btn-info" id="viewer">Viewer</a>
+          <a href="#" class="btn btn-info" id="wt-toggle">Whiteboard</a>
+          <a href="#" class="btn btn-danger" id="terminate">Stop</a>
+        </div>
+      </div>
+      <div class="row mb-2">
+        <div class="input-group">
+          <span for="room" class="input-group-text">Room name</span>
+          <input
+            type="text"
+            class="form-control"
+            id="room"
+            placeholder="Enter Room Name"
+            value="webrtcUnhas"
+          />
+        </div>
+      </div>
+
+      <div class="row"></div>
+    </div>
+
+    <div class="col-lg-6"> <%# right side for chat %>
+      <div class="row mb-2">
+        <div class="overflow-auto visualize-border card" style="height: 480px">
+            <div class="card-body">
+            </div>
+        </div> <%# chat %>
+      </div>
+
+      <div class="row mb-2">
+        <div class="input-group">
+          <span for="room" class="input-group-text">message</span>
+          <textarea class="form-control" aria-label="With textarea">Hello!</textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row" style="border: 1px solid #ccc; display: none;" id="whiteboard">
+    <div id="wt-container" class="not-active"></div>
+  </div>
+</div>
+
+<script src="bower_components/webrtc-adapter/release/adapter.js"></script>
+<script src="bower_components/kurento-utils/js/kurento-utils.js"></script>
+<script src="//cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://www.whiteboard.team/dist/api.js"></script>
+<script src="js/indexRoom.js"></script>
+<script>
+  $(document).ready(function() {
+
+    const wtToggle = $('#wt-toggle');
+
+    wtToggle.click(function() {
+      $('#wt-container').toggleClass('wt-active');
+
+      if ($('#wt-container').hasClass('wt-active')) {
+        $('#wt-container').css('height', '550px');
+        $('#whiteboard').css('display', 'block');
+        let wt = new api.WhiteboardTeam('#wt-container', {
+          clientId: '52dbc6128373bb240024ebf97631d932',
+          boardCode: `siruntu-whiteboard-${$('#room').val()}`,
+          participant: {
+            name: crypto.randomUUID(),
+          }
+        });
+      } else {
+        $('#wt-container').css('height', '0px');
+        $('#whiteboard').css('display', 'none');
+        $('#wt-container').empty();
+      }
+    });
+
+    // give high to wt container
+
+  })
+</script>

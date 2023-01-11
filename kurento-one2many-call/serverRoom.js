@@ -23,9 +23,9 @@ const ws = require('ws');
 const kurento = require('kurento-client');
 const fs = require('fs');
 const https = require('https');
-const _ = require('lodash');
 
 const errors = require('./errors');
+const routes = require('./routes');
 
 const argv = minimist(process.argv.slice(2), {
     default: {
@@ -34,13 +34,14 @@ const argv = minimist(process.argv.slice(2), {
     }
 });
 
-const options =
-{
+const options = {
     key: fs.readFileSync('keys/server.key'),
     cert: fs.readFileSync('keys/server.crt')
 };
 
 const app = express();
+app.set("view engine", "ejs");
+app.use('/', routes);
 
 /*
  * Definition of global variables.
@@ -485,6 +486,7 @@ async function startPresenter(sessionId, ws, sdpOffer, recorderType, room) {
         id: sessionId,
         pipeline: null,
         webRtcEndpoint: null,
+        recorderEndpoint: null,
         room: room,
         ws: ws
     };
