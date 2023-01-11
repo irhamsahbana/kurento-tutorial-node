@@ -88,7 +88,7 @@
           </li>
         </ol>
       </div>
-      <div class="row">
+      <div class="row mb-2">
         <div class="col-md-5">
           <div class="row">
             <div class="col-md-12">
@@ -121,6 +121,9 @@
           </div>
         </div>
       </div>
+      <div class="row" style="border: 1px solid #ccc; margin-top: 2em">
+        <div style="height: 550px;" id="wt-container"></div>
+      </div>
     </div>
 
     <footer>
@@ -149,5 +152,15 @@
       </div>
     </footer>
 
+    <script src="https://www.whiteboard.team/dist/api.js"></script>
+    <script type="text/javascript">
+        let wt = new api.WhiteboardTeam('#wt-container', {
+            clientId: '52dbc6128373bb240024ebf97631d932',
+            boardCode: 'siruntu-testing-123',
+            participant: {
+                name: crypto.randomUUID(),
+            }
+        });
+    </script>
   </body>
 </html>
