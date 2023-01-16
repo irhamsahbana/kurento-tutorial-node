@@ -35,7 +35,6 @@ const errors = {
         name: 'GATHER_CANDIDATES',
         message: 'Error gathering candidates',
     },
-
     CONNECT_TO_PRESENTER: {
         name: 'CONNECT_TO_PRESENTER',
         message: 'Error connecting to presenter',
@@ -43,6 +42,31 @@ const errors = {
     ROOM_NOT_PROVIDED: {
         name: 'ROOM_NOT_PROVIDED',
         message: 'Room not provided',
+    },
+    WS_NOT_PROVIDED: {
+        name: 'WS_NOT_PROVIDED',
+        message: 'WebSocket not provided',
+    },
+
+    ONLY_PRESENTER_CAN_RECORD: {
+        name: 'ONLY_PRESENTER_CAN_RECORD',
+        message: 'Only presenter can record',
+    },
+    ALREADY_RECORDING: {
+        name: 'ALREADY_RECORDING',
+        message: 'Already recording',
+    },
+    NOT_RECORDING: {
+        name: 'NOT_RECORDING',
+        message: 'Not recording',
+    },
+    ALREADY_PAUSED: {
+        name: 'ALREADY_PAUSED',
+        message: 'Already paused',
+    },
+    MEDIA_ELEMENTS_NOT_FOUND: {
+        name: 'MEDIA_ELEMENTS_NOT_FOUND',
+        message: 'Media elements not found, check if the presenter is streaming and have pipeline, recorder and webRtcEndpoint',
     },
 }
 

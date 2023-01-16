@@ -19,6 +19,7 @@ const ws = new WebSocket('wss://' + location.host + '/one2many');
 let video;
 let webRtcPeer;
 let room;
+let recordType = 'screen';
 
 $(document).ready(function () {
 	video = document.getElementById('video');
@@ -27,6 +28,8 @@ $(document).ready(function () {
 	$('#callScreen').click(() => presenterScreen());
 	$('#viewer').click(() => viewer());
 	$('#terminate').click(() => stop());
+
+	$('#record').attr('onclick', 'record()');
 	room = $('#room').val();
 
 	$('#room').on('change', () => room = $('#room').val());
@@ -56,6 +59,12 @@ ws.onmessage = function (_message) {
 			break;
 		case 'viewerResponse':
 			viewerResponse(message);
+			break;
+		case 'recordResponse':
+			recordResponse(message);
+			break;
+		case 'stopRecordResponse':
+			stopRecordResponse(message);
 			break;
 		case 'stopCommunication':
 			if (message.room == room)
@@ -91,6 +100,46 @@ function viewerResponse(message) {
 	} else {
 		webRtcPeer.processAnswer(message.sdpAnswer);
 	}
+}
+
+function recordResponse(message) {
+	if (message.response != 'accepted') {
+		const errorMsg = message.message ? message.message : 'Unknow error';
+		console.warn('Call not accepted for the following reason: ' + errorMsg);
+
+		return onError(errorMsg);
+	}
+
+	Swal.fire({
+		icon: 'success',
+		title: 'Recording',
+		text: 'Recording started',
+	})
+
+	$('#record').html('Stop Recording ...');
+	$('#record').attr('onclick', 'stopRecord()');
+	$('#record').removeClass('btn-success');
+	$('#record').addClass('btn-danger');
+}
+
+function stopRecordResponse(message) {
+	if (message.response != 'accepted') {
+		const errorMsg = message.message ? message.message : 'Unknow error';
+		console.warn('Call not accepted for the following reason: ' + errorMsg);
+
+		return onError(errorMsg);
+	}
+
+	Swal.fire({
+		icon: 'success',
+		title: 'Recording',
+		text: 'Recording stopped',
+	})
+
+	$('#record').html('Record');
+	$('#record').attr('onclick', 'record()');
+	$('#record').removeClass('btn-danger');
+	$('#record').addClass('btn-success');
 }
 
 function presenter() {
@@ -154,10 +203,12 @@ async function presenterScreen() {
 function onOfferPresenter(error, offerSdp) {
 	if (error) return onError(error);
 
+	recordType = 'webcam'
+
 	const message = {
 		id: 'presenter',
 		sdpOffer: offerSdp,
-		type: 'webcam',
+		type: recordType,
 		room: room
 	};
 	sendMessage(message);
@@ -166,10 +217,12 @@ function onOfferPresenter(error, offerSdp) {
 function onOfferPresenterScreen(error, offerSdp) {
 	if (error) return onError(error);
 
+	recordType = 'screen'
+
 	const message = {
 		id: 'presenter',
 		sdpOffer: offerSdp,
-		type: 'screen',
+		type: recordType,
 		room: room
 	};
 	sendMessage(message);
@@ -192,6 +245,26 @@ function viewer() {
 			this.generateOffer(onOfferViewer);
 		});
 	}
+}
+
+function record() {
+	if (!room) return onError('You must insert room name');
+
+	const message = {
+		id: 'record',
+		room: room,
+		type: recordType
+	};
+	sendMessage(message);
+}
+
+function stopRecord() {
+	const message = {
+		id: 'stopRecord',
+		room: room
+	};
+
+	sendMessage(message);
 }
 
 function onOfferViewer(error, offerSdp) {
@@ -223,6 +296,11 @@ function stop() {
 		}
 		sendMessage(message);
 		dispose();
+
+		$('#record').html('Record');
+		$('#record').attr('onclick', 'record()');
+		$('#record').removeClass('btn-danger');
+		$('#record').addClass('btn-success');
 	}
 }
 

@@ -151,6 +151,38 @@ wss.on('connection', function (ws) {
                 stop(sessionId);
                 break;
 
+            case 'record':
+                startRecording(ws, message.room, message.type).then(() => {
+                    ws.send(JSON.stringify({
+                        id: 'recordResponse',
+                        response: 'accepted'
+                    }));
+                }).catch(error => {
+                    console.log('<<<<<<<<<<<<<<<<<<<', error, '>>>>>>>>>>>>>>>>>>>>>>>>>');
+                    ws.send(JSON.stringify({
+                        id: 'recordResponse',
+                        response: 'rejected',
+                        message: error.name + ': ' + error.message
+                    }));
+                });
+                break;
+
+            case 'stopRecord':
+                stopRecording(ws, message.room).then(() => {
+                    ws.send(JSON.stringify({
+                        id: 'stopRecordResponse',
+                        response: 'accepted'
+                    }));
+                }).catch(error => {
+                    console.log('<<<<<<<<<<<<<<<<<<<', error, '>>>>>>>>>>>>>>>>>>>>>>>>>');
+                    ws.send(JSON.stringify({
+                        id: 'stopRecordResponse',
+                        response: 'rejected',
+                        message: error.name + ': ' + error.message
+                    }));
+                });
+                break;
+
             case 'onIceCandidate':
                 onIceCandidate(sessionId, message.candidate);
                 break;
@@ -378,6 +410,33 @@ function connectWebRtcEndpointWithRecorder(pipeline, webRtcEndpoint, recorderEnd
     });
 }
 
+function disconnectWebRtcEndpointWithRecorder(pipeline, webRtcEndpoint, recorderEndpoint) {
+    return new Promise((resolve, reject) => {
+        webRtcEndpoint.disconnect(recorderEndpoint, (error) => {
+            if (error) {
+                const err = errors.DISCONNECT_MEDIA_ELEMENTS
+                err.message = error;
+                pipeline.release();
+
+                return reject(err);
+            }
+
+            recorderEndpoint.stop((error) => {
+                if (error) {
+                    const err = errors.STOP_MEDIA_ELEMENT
+                    err.message = error;
+                    pipeline.release();
+
+                    return reject(err);
+                }
+
+                return resolve();
+            });
+
+        });
+    });
+}
+
 function addingIceCandidate(webRtcEndpoint, ws, sessionId) {
     return new Promise((resolve, reject) => {
         while (candidatesQueue[sessionId]?.length) {
@@ -487,6 +546,7 @@ async function startPresenter(sessionId, ws, sdpOffer, recorderType, room) {
         pipeline: null,
         webRtcEndpoint: null,
         recorderEndpoint: null,
+        isRecording: false,
         room: room,
         ws: ws
     };
@@ -499,16 +559,13 @@ async function startPresenter(sessionId, ws, sdpOffer, recorderType, room) {
     const webRtcEndpoint = await createMediaElements(kurentoTypes.WEBRTC_ENDPOINT, pipeline);
     presenter.webRtcEndpoint = webRtcEndpoint;
     await addingIceCandidate(webRtcEndpoint, ws, sessionId);
-    const recorderEndpoint = await createMediaElements(kurentoTypes.RECORDER_ENDPOINT, pipeline, room, recorderType);
-
-    await connectWebRtcEndpointWithRecorder(pipeline, webRtcEndpoint, recorderEndpoint);
 
     presenters.push(presenter);
-
 
     const sdpAnswer = await processOffer(sdpOffer, webRtcEndpoint);
     await gatherCandidates(webRtcEndpoint);
 
+    ws.role = 'presenter';
     return sdpAnswer;
 }
 
@@ -539,7 +596,53 @@ async function startViewer(sessionId, ws, sdpOffer, room) {
 
     viewers.push(viewer);
 
+    ws.role = 'viewer';
     return sdpAnswer;
+}
+
+async function startRecording(ws, room, recorderType) {
+    if (!room) return Promise.reject(errors.ROOM_NOT_PROVIDED);
+    if (!ws) return Promise.reject(errors.WS_NOT_PROVIDED);
+    if (ws.role !== 'presenter') return Promise.reject(errors.ONLY_PRESENTER_CAN_RECORD);
+
+    const presenterIndex = getPresenterIndex(room);
+    if (presenterIndex === -1) return Promise.reject(errors.PRESENTER_NOT_FOUND);
+
+    const presenter = presenters[presenterIndex];
+    const pipeline = presenter.pipeline;
+    const webRtcEndpoint = presenter.webRtcEndpoint;
+
+    const recorderEndpoint = await createMediaElements(kurentoTypes.RECORDER_ENDPOINT, pipeline, room, recorderType);
+    presenter.recorderEndpoint = recorderEndpoint;
+
+    if (!webRtcEndpoint || !pipeline || !recorderEndpoint) return Promise.reject(errors.MEDIA_ELEMENTS_NOT_FOUND);
+
+    await connectWebRtcEndpointWithRecorder(pipeline, webRtcEndpoint, recorderEndpoint);
+    presenter.isRecording = true;
+    return Promise.resolve();
+}
+
+async function stopRecording(ws, room) {
+    if (!room) return Promise.reject(errors.ROOM_NOT_PROVIDED);
+    if (!ws) return Promise.reject(errors.WS_NOT_PROVIDED);
+    if (ws.role !== 'presenter') return Promise.reject(errors.ONLY_PRESENTER_CAN_RECORD);
+
+    const presenterIndex = getPresenterIndex(room);
+    if (presenterIndex === -1) return Promise.reject(errors.PRESENTER_NOT_FOUND);
+
+    const presenter = presenters[presenterIndex];
+    const pipeline = presenter.pipeline;
+    const webRtcEndpoint = presenter.webRtcEndpoint;
+    const recorderEndpoint = presenter.recorderEndpoint;
+
+    if (!presenter.isRecording) return Promise.reject(errors.NOT_RECORDING);
+    if (!webRtcEndpoint || !pipeline || !recorderEndpoint) return Promise.reject(errors.MEDIA_ELEMENTS_NOT_FOUND);
+
+    await disconnectWebRtcEndpointWithRecorder(pipeline, webRtcEndpoint, recorderEndpoint);
+
+    presenters[presenterIndex].recorderEndpoint = null
+
+    return Promise.resolve();
 }
 
 app.use(express.static(path.join(__dirname, 'static')));
