@@ -15,6 +15,7 @@
  *
  */
 
+require('dotenv').config();
 const path = require('path');
 const url = require('url');
 const express = require('express');
@@ -27,28 +28,16 @@ const https = require('https');
 const errors = require('./errors');
 const routes = require('./routes');
 
-// const argv = minimist(process.argv.slice(2), {
-//     default: {
-//         as_uri: 'https://localhost:8443/',
-//         ws_uri: 'ws://localhost:8888/kurento'
-//     }
-// });
-
-// const options = {
-//     key: fs.readFileSync('keys/server.key'),
-//     cert: fs.readFileSync('keys/server.crt')
-// };
-
 const argv = minimist(process.argv.slice(2), {
     default: {
-        as_uri: 'https://siruntu.irhams.xyz:8000/',
-        ws_uri: 'ws://siruntu.irhams.xyz:8888/kurento'
+        as_uri: process.env.AS_URI,
+        ws_uri: process.env.WS_URI
     }
 });
 
 const options = {
-    key: fs.readFileSync('/home/irham/cert/siruntu.irhams.xyz/privkey.pem', 'utf8'),
-    cert: fs.readFileSync('/home/irham/cert/siruntu.irhams.xyz/fullchain.pem', 'utf8')
+    key: fs.readFileSync(process.env.KEY_PATH, 'utf8'),
+    cert: fs.readFileSync(process.env.CERT_PATH, 'utf8')
 }
 
 const app = express();

@@ -8,6 +8,7 @@
     "dev": "nodemon app.js"
   },
   "dependencies": {
+    "dotenv": "^16.0.3",
     "ejs": "^3.1.8",
     "express": "^4.17.0",
     "kurento-client": "git+https://github.com/Kurento/kurento-client-js.git",
