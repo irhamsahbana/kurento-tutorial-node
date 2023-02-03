@@ -43,6 +43,14 @@ const errors = {
         name: 'ROOM_NOT_PROVIDED',
         message: 'Room not provided',
     },
+    USERNAME_NOT_PROVIDED: {
+        name: 'USERNAME_NOT_PROVIDED',
+        message: 'Username not provided',
+    },
+    USERNAME_ALREADY_EXISTS: {
+        name: 'USERNAME_ALREADY_EXISTS',
+        message: 'Username already exists in the room',
+    },
     WS_NOT_PROVIDED: {
         name: 'WS_NOT_PROVIDED',
         message: 'WebSocket not provided',

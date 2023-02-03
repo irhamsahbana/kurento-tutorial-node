@@ -19,6 +19,7 @@ const ws = new WebSocket('wss://' + location.host + '/one2many');
 let video;
 let webRtcPeer;
 let room;
+let username;
 let recordType = 'screen';
 
 $(document).ready(function () {
@@ -31,8 +32,10 @@ $(document).ready(function () {
 
 	$('#record').attr('onclick', 'record()');
 	room = $('#room').val();
+	username = $('#username').val();
 
 	$('#room').on('change', () => room = $('#room').val());
+	$('#username').on('change', () => username = $('#username').val());
 });
 
 $(window).on('beforeunload', function () {
@@ -144,6 +147,7 @@ function stopRecordResponse(message) {
 
 function presenter() {
 	if (!room) return onError('You must insert room name');
+	if (!username) return onError('You must insert your username');
 
 	if (!webRtcPeer) {
 		showSpinner(video);
@@ -209,7 +213,8 @@ function onOfferPresenter(error, offerSdp) {
 		id: 'presenter',
 		sdpOffer: offerSdp,
 		type: recordType,
-		room: room
+		room: room,
+		username: username
 	};
 	sendMessage(message);
 }
@@ -223,13 +228,15 @@ function onOfferPresenterScreen(error, offerSdp) {
 		id: 'presenter',
 		sdpOffer: offerSdp,
 		type: recordType,
-		room: room
+		room: room,
+		username: username
 	};
 	sendMessage(message);
 }
 
 function viewer() {
 	if (!room) return onError('You must insert room name');
+	if (!username) return onError('You must insert your username');
 
 	if (!webRtcPeer) {
 		showSpinner(video);
@@ -273,7 +280,8 @@ function onOfferViewer(error, offerSdp) {
 	const message = {
 		id: 'viewer',
 		sdpOffer: offerSdp,
-		room: room
+		room: room,
+		username: username
 	}
 	sendMessage(message);
 }

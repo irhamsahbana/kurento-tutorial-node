@@ -109,7 +109,7 @@ wss.on('connection', function (ws) {
 
         switch (message.id) {
             case 'presenter':
-                startPresenter(sessionId, ws, message.sdpOffer, message.type, message.room)
+                startPresenter(sessionId, ws, message.sdpOffer, message.room, message.username)
                     .then(sdpAnswer => {
                         ws.send(JSON.stringify({
                             id: 'presenterResponse',
@@ -129,7 +129,7 @@ wss.on('connection', function (ws) {
                 break;
 
             case 'viewer':
-                startViewer(sessionId, ws, message.sdpOffer, message.room)
+                startViewer(sessionId, ws, message.sdpOffer, message.room, message.username)
                     .then(sdpAnswer => {
                         ws.send(JSON.stringify({
                             id: 'viewerResponse',
@@ -535,12 +535,20 @@ function connectViewerToPresenter(webRtcEndpoint, room) {
     });
 }
 
-async function startPresenter(sessionId, ws, sdpOffer, recorderType, room) {
+async function startPresenter(sessionId, ws, sdpOffer, room, username) {
     clearCandidatesQueue(sessionId);
 
     if (!room) return Promise.reject(errors.ROOM_NOT_PROVIDED);
+    if (!username) return Promise.reject(errors.USERNAME_NOT_PROVIDED);
+
     const presenterExistInRoom = presenters.find(o => o.room === room);
     if (presenterExistInRoom) return Promise.reject(errors.PRESENTER_EXISTS);
+
+    const usernameExistInRoomViewers = viewers.find(o => o.room === room && o.username === username);
+    if (usernameExistInRoomViewers) return Promise.reject(errors.USERNAME_ALREADY_EXISTS);
+
+    const usernameExistInRoomPresenters = presenters.find(o => o.room === room && o.username === username);
+    if (usernameExistInRoomPresenters) return Promise.reject(errors.USERNAME_ALREADY_EXISTS);
 
     const presenter = {
         id: sessionId,
@@ -549,6 +557,7 @@ async function startPresenter(sessionId, ws, sdpOffer, recorderType, room) {
         recorderEndpoint: null,
         isRecording: false,
         room: room,
+        username: username,
         ws: ws
     };
 
@@ -570,16 +579,23 @@ async function startPresenter(sessionId, ws, sdpOffer, recorderType, room) {
     return sdpAnswer;
 }
 
-async function startViewer(sessionId, ws, sdpOffer, room) {
+async function startViewer(sessionId, ws, sdpOffer, room, username) {
     clearCandidatesQueue(sessionId);
 
     const presenterIndex = getPresenterIndex(room);
     if (presenterIndex === -1) return Promise.reject(errors.PRESENTER_NOT_FOUND);
 
+    const usernameExistInRoomViewers = viewers.find(o => o.room === room && o.username === username);
+    if (usernameExistInRoomViewers) return Promise.reject(errors.USERNAME_ALREADY_EXISTS);
+
+    const usernameExistInRoomPresenters = presenters.find(o => o.room === room && o.username === username);
+    if (usernameExistInRoomPresenters) return Promise.reject(errors.USERNAME_ALREADY_EXISTS);
+
     const viewer = {
         id: sessionId,
         webRtcEndpoint: null,
         room: room,
+        username: username,
         ws: ws
     }
 
@@ -642,6 +658,7 @@ async function stopRecording(ws, room) {
     await disconnectWebRtcEndpointWithRecorder(pipeline, webRtcEndpoint, recorderEndpoint);
 
     presenters[presenterIndex].recorderEndpoint = null
+    presenters[presenterIndex].isRecording = false;
 
     return Promise.resolve();
 }
