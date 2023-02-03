@@ -32,7 +32,7 @@ $(document).ready(function () {
 
 	$('#record').attr('onclick', 'record()');
 	room = $('#room').val();
-	username = $('#username').val();
+	username = $('#username').val(localStorage.getItem('siruntu_username'));
 
 	$('#room').on('change', () => room = $('#room').val());
 	$('#username').val(localStorage.getItem('siruntu_username'));
@@ -40,7 +40,6 @@ $(document).ready(function () {
 		username = $('#username').val()
 		localStorage.setItem('siruntu_username', username);
 	});
-
 });
 
 $(window).on('beforeunload', function () {
