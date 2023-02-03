@@ -35,7 +35,12 @@ $(document).ready(function () {
 	username = $('#username').val();
 
 	$('#room').on('change', () => room = $('#room').val());
-	$('#username').on('change', () => username = $('#username').val());
+	$('#username').val(localStorage.getItem('siruntu_username'));
+	$('#username').on('change', () => {
+		username = $('#username').val()
+		localStorage.setItem('siruntu_username', username);
+	});
+
 });
 
 $(window).on('beforeunload', function () {
