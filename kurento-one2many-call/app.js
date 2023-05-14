@@ -94,6 +94,14 @@ wss.on('connection', function (ws) {
 
     ws.on('close', function () {
         console.log('Connection ' + sessionId + ' closed');
+        wss.clients.forEach(function (client) {
+            if (client.room === ws.room) {
+                client.send(JSON.stringify({
+                    id: 'leaveRoom',
+                    username: ws.username
+                }));
+            }
+        });
         stop(sessionId);
     });
 
@@ -105,9 +113,17 @@ wss.on('connection', function (ws) {
         else
             console.log('Connection ' + sessionId + ' received message', message);
 
-        ws.room = message.room;
-
         switch (message.id) {
+            case 'joinRoom':
+                joinRoom(ws, message, sessionId).catch(error => {
+                    console.log('<<<<<<<<<<<<<<<<<<<', error, '>>>>>>>>>>>>>>>>>>>>>>>>>');
+                    ws.send(JSON.stringify({
+                        id: 'joinRoomResponse',
+                        response: 'rejected',
+                        message: error.name + ': ' + error.message
+                    }));
+                });
+                break;
             case 'presenter':
                 startPresenter(sessionId, ws, message.sdpOffer, message.room, message.username)
                     .then(sdpAnswer => {
@@ -188,6 +204,10 @@ wss.on('connection', function (ws) {
                 onIceCandidate(sessionId, message.candidate);
                 break;
 
+            case 'chatMessage':
+                ws.username = message.username;
+                sendMessage(ws, message);
+                break;
             default:
                 ws.send(JSON.stringify({
                     id: 'error',
@@ -241,7 +261,8 @@ function stop(sessionId) {
                 }));
             }
         }
-        presenters[presenterIndex].pipeline.release();
+
+        if (presenters[presenterIndex].pipeline) presenters[presenterIndex].pipeline.release();
 
         while (viewers?.length) {
             viewers.shift();
@@ -251,7 +272,7 @@ function stop(sessionId) {
     }
 
     if (isViewer) {
-        viewers[viewerIndex].webRtcEndpoint.release();
+        if (viewers[viewerIndex].webRtcEndpoint) viewers[viewerIndex].webRtcEndpoint.release();
         viewers.splice(viewerIndex, 1);
     }
 
@@ -267,8 +288,8 @@ function stop(sessionId) {
         kurentoClient = null;
     }
 
-    console.log('presenters', presenters);
-    console.log('viewers', viewers);
+    console.log('presenters left:', presenters.length);
+    console.log('viewers left:', viewers.length);
 }
 
 function onIceCandidate(sessionId, _candidate) {
@@ -541,25 +562,7 @@ async function startPresenter(sessionId, ws, sdpOffer, room, username) {
     if (!room) return Promise.reject(errors.ROOM_NOT_PROVIDED);
     if (!username) return Promise.reject(errors.USERNAME_NOT_PROVIDED);
 
-    const presenterExistInRoom = presenters.find(o => o.room === room);
-    if (presenterExistInRoom) return Promise.reject(errors.PRESENTER_EXISTS);
-
-    const usernameExistInRoomViewers = viewers.find(o => o.room === room && o.username === username);
-    if (usernameExistInRoomViewers) return Promise.reject(errors.USERNAME_ALREADY_EXISTS);
-
-    const usernameExistInRoomPresenters = presenters.find(o => o.room === room && o.username === username);
-    if (usernameExistInRoomPresenters) return Promise.reject(errors.USERNAME_ALREADY_EXISTS);
-
-    const presenter = {
-        id: sessionId,
-        pipeline: null,
-        webRtcEndpoint: null,
-        recorderEndpoint: null,
-        isRecording: false,
-        room: room,
-        username: username,
-        ws: ws
-    };
+    const presenter = presenters.find(o => o.id === sessionId);
 
     const kurentoClient = await getKurentoCLient();
     const pipeline = await kurentoClientCreate(kurentoTypes.MEDIA_PIPELINE, kurentoClient);
@@ -585,22 +588,9 @@ async function startViewer(sessionId, ws, sdpOffer, room, username) {
     const presenterIndex = getPresenterIndex(room);
     if (presenterIndex === -1) return Promise.reject(errors.PRESENTER_NOT_FOUND);
 
-    const usernameExistInRoomViewers = viewers.find(o => o.room === room && o.username === username);
-    if (usernameExistInRoomViewers) return Promise.reject(errors.USERNAME_ALREADY_EXISTS);
-
-    const usernameExistInRoomPresenters = presenters.find(o => o.room === room && o.username === username);
-    if (usernameExistInRoomPresenters) return Promise.reject(errors.USERNAME_ALREADY_EXISTS);
-
-    const viewer = {
-        id: sessionId,
-        webRtcEndpoint: null,
-        room: room,
-        username: username,
-        ws: ws
-    }
+    const viewer = viewers.find(o => o.id === sessionId);
 
     const webRtcEndpoint = await createMediaElements(kurentoTypes.WEBRTC_ENDPOINT, presenters[presenterIndex].pipeline);
-
     viewer.webRtcEndpoint = webRtcEndpoint;
 
     await addingIceCandidate(webRtcEndpoint, ws, sessionId);
@@ -659,6 +649,69 @@ async function stopRecording(ws, room) {
 
     presenters[presenterIndex].recorderEndpoint = null
     presenters[presenterIndex].isRecording = false;
+
+    return Promise.resolve();
+}
+
+async function sendMessage(ws, message) {
+    wss.clients.forEach(client => {
+        if (client.room === ws.room && client.username !== ws.username) {
+            client.send(JSON.stringify(message));
+        }
+    });
+
+    return Promise.resolve();
+}
+
+async function joinRoom(ws, message, sessionId) {
+    ws.username = message.username;
+    ws.room = message.room;
+    ws.role = message.role;
+
+    const usernameExistInRoomViewers = viewers.find(o => o.room === message.room && o.username === message.username);
+    if (usernameExistInRoomViewers) return Promise.reject(errors.USERNAME_ALREADY_EXISTS);
+
+    const usernameExistInRoomPresenters = presenters.find(o => o.room === message.room && o.username === message.username);
+    if (usernameExistInRoomPresenters) return Promise.reject(errors.USERNAME_ALREADY_EXISTS);
+
+    const presenterExistInRoom = presenters.find(o => o.room === message.room);
+    if (presenterExistInRoom && message.role === 'presenter') return Promise.reject(errors.PRESENTER_EXISTS);
+
+    if (message.role === 'presenter') {
+        const client = {
+            id: sessionId,
+            pipeline: null,
+            webRtcEndpoint: null,
+            recorderEndpoint: null,
+            isRecording: false,
+            room: message.room,
+            username: message.username,
+            ws: ws
+        }
+
+        presenters.push(client);
+    } else if (message.role === 'viewer') {
+        const client = {
+            id: sessionId,
+            webRtcEndpoint: null,
+            room: message.room,
+            username: message.username,
+            ws: ws
+        }
+
+        viewers.push(client);
+    }
+
+    wss.clients.forEach(function (client) {
+        if (client.room === ws.room) {
+            client.send(JSON.stringify({
+                id: 'joinRoomResponse',
+                response: 'accepted',
+                username: ws.username,
+                role: message.role
+            }));
+        }
+    });
 
     return Promise.resolve();
 }

@@ -20,7 +20,9 @@ let video;
 let webRtcPeer;
 let room;
 let username;
+let role;
 let recordType = 'screen';
+let chatMessage = document.getElementById('chatMessage');
 
 $(document).ready(function () {
 	video = document.getElementById('video');
@@ -37,8 +39,33 @@ $(document).ready(function () {
 	$('#room').on('change', () => room = $('#room').val());
 	$('#username').val(localStorage.getItem('siruntu_username'));
 	$('#username').on('change', () => {
-		username = $('#username').val()
+		username = $('#username').val();
 		localStorage.setItem('siruntu_username', username);
+	});
+
+	init();
+
+	chatMessage.addEventListener('keydown', function (event) {
+		if (event.key === 'Enter' && event.ctrlKey) {
+			event.preventDefault();
+
+			let username = $('#username').val();
+			let room = $('#room').val();
+
+			if (chatMessage.value.trim() == '') return
+			if (username == '') return onError('You must insert your username');
+			if (room == '') return onError('You must insert room name');
+
+			sendChat();
+
+			$('#chat').append(`<div class="hey"><b>${username} (Me)</b>: ${chatMessage.value}</div>`);
+
+			// auto scroll to bottom
+			const chat = document.getElementById('chat');
+			chat.scrollIntoView({ behavior: "smooth", block: "end" });
+			// delete text
+			event.target.value = '';
+		}
 	});
 });
 
@@ -80,6 +107,42 @@ ws.onmessage = function (_message) {
 		case 'iceCandidate':
 			webRtcPeer.addIceCandidate(message.candidate)
 			break;
+		case 'chatMessage':
+			$('#chat').append(`<div class="hey"><b>${message.username}</b>: ${message.message}</div>`);
+			break;
+		case 'joinRoomResponse':
+			if (message.response != 'accepted') {
+				const errorMsg = message.message ? message.message : 'Unknow error';
+				console.warn('Call not accepted for the following reason: ' + errorMsg);
+				Swal.fire({
+					icon: 'error',
+					title: 'Oops...',
+					text: errorMsg,
+				})
+				dispose();
+				// reload page
+				setTimeout(() => {
+					location.reload();
+				}, 3000);
+				return
+			}
+
+			if (message.role === 'viewer' && message.username === username) {
+				// hide buttons
+				$('#record').hide();
+				$('#call').hide();
+				$('#callScreen').hide();
+			}
+
+			if (message.role == 'presenter' && message.username === username) {
+				// viewer button hide
+				$('#viewer').hide();
+			}
+
+			$('#chat').append(`<div class="text-center"><b style="color: #696969;">${message.username} joined the room</b></div>`);
+			break;
+		case 'leaveRoom':
+			$('#chat').append(`<div class="text-center"><b style="color: #696969;">${message.username} left the room</b></div>`);
 		default:
 			console.error('Unrecognized message', message);
 	}
@@ -345,6 +408,92 @@ function hideSpinner() {
 	}
 }
 
+function sendChat() {
+	const message = {
+		id: 'chatMessage',
+		room: room,
+		username: $('#username').val(),
+		message: $('#chatMessage').val()
+	};
+	sendMessage(message);
+}
+
+async function init() {
+	// when the page is loaded, ask user for username and room with sweetalert
+	// assign username and room to global variables
+
+	await Swal.fire({
+		title: 'Enter your username',
+		input: 'text',
+		inputValue: $('#username').val(),
+		inputAttributes: {
+			autocapitalize: 'off'
+		},
+		showCancelButton: false,
+		confirmButtonText: 'Enter',
+		showLoaderOnConfirm: true,
+		preConfirm: (username) => {
+			if (!username) Swal.showValidationMessage(`Please enter your username`)
+			if (username.length < 6) Swal.showValidationMessage(`Username must be at least 6 characters`)
+
+			$('#username').val(username);
+			$('#username').attr('disabled', true);
+		}
+	});
+
+	await Swal.fire({
+		title: 'Enter room name',
+		input: 'text',
+		inputValue: $('#room').val(),
+		inputAttributes: {
+			autocapitalize: 'off'
+		},
+		showCancelButton: false,
+		confirmButtonText: 'Enter',
+		showLoaderOnConfirm: true,
+		preConfirm: (room) => {
+			if (!room) Swal.showValidationMessage(`Please enter room name`)
+			if (room.length < 6) Swal.showValidationMessage(`Room name must be at least 6 characters`)
+
+			$('#room').val(room);
+			$('#room').attr('disabled', true);
+		}
+	})
+
+	// ask role
+	await Swal.fire({
+		title: 'Choose your role',
+		input: 'select',
+		inputOptions: {
+			presenter: 'Presenter',
+			viewer: 'Viewer'
+		},
+		inputPlaceholder: 'Select a role',
+		showCancelButton: false,
+		confirmButtonText: 'Enter',
+		showLoaderOnConfirm: true,
+		preConfirm: (role) => {
+			if (!role) Swal.showValidationMessage(`Please choose your role`)
+			if (role.length < 5) Swal.showValidationMessage(`Room name must be at least 6 characters`)
+		},
+		allowOutsideClick: false
+	}).then((result) => {
+		role = result.value;
+	})
+
+	const msg = {
+		id: 'joinRoom',
+		room: $('#room').val(),
+		username: $('#username').val(),
+		role: role
+	};
+
+	username = $('#username').val();
+	room = $('#room').val();
+
+	sendMessage(msg);
+}
+
 /**
  * Lightbox utility (to display media pipeline image in a modal dialog)
  */
@@ -352,3 +501,5 @@ $(document).delegate('*[data-toggle="lightbox"]', 'click', function (event) {
 	event.preventDefault();
 	$(this).ekkoLightbox();
 });
+
+
